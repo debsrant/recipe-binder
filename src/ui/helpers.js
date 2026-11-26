@@ -30,8 +30,7 @@ export function generateId(prefix = 'rec') {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
-export function downloadJson(filename, data) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+export function downloadBlob(filename, blob) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -40,6 +39,15 @@ export function downloadJson(filename, data) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+export function downloadTextFile(filename, content, mimeType = 'text/plain;charset=utf-8') {
+  const blob = new Blob([content], { type: mimeType });
+  downloadBlob(filename, blob);
+}
+
+export function downloadJson(filename, data) {
+  downloadTextFile(filename, JSON.stringify(data, null, 2), 'application/json');
 }
 
 /**

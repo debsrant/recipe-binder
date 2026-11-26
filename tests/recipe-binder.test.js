@@ -12,6 +12,21 @@ import {
   mergeCollectionSnapshots,
   parseTagsInput,
 } from '../src/lib/collection.js';
+import {
+  parseMarkdownRecipe,
+  recipeToFilename,
+  recipeToMarkdown,
+  slugifyFilename,
+} from '../src/lib/markdown.js';
+import {
+  decodeHtmlEntities,
+  parseDurationMinutes,
+  parseHtmlRecipe,
+  parseImportedContent,
+  parseTextRecipe,
+} from '../src/lib/recipeImport.js';
+import { validateRecipeUrl } from '../src/lib/webScraper.js';
+import { createZipBytes } from '../src/lib/zip.js';
 
 test('parseQuantityToken handles integers, decimals, slash fractions, mixed numbers, and Unicode', () => {
   assert.equal(parseQuantityToken('2'), 2);
@@ -164,4 +179,317 @@ test('mergeCollectionSnapshots resolves recipe conflicts by updatedMs and preser
   assert.equal(byId.get('r1').title, 'Remote Newer');
   assert.equal(byId.get('r2').title, 'Local Newer');
   assert.equal(byId.get('r3').deleted, true);
+});
+
+const TEST_DIVIDERS = [
+  { id: 'weeknight', name: 'Weeknight Staples', order: 0 },
+  { id: 'baking', name: 'Baking', order: 1 },
+  { id: 'breakfast', name: 'Breakfast', order: 2 },
+  { id: 'sides', name: 'Sides & Salads', order: 3 },
+];
+
+test('recipeToMarkdown and parseMarkdownRecipe round-trip frontmatter and scaled export', () => {
+  const sample = {
+    id: 'rec-garlic-pasta',
+    title: 'Garlic Butter Pasta',
+    dividerId: 'weeknight',
+    source: 'Kitchen Notebook',
+    summary: 'Quick weeknight buttered spaghetti with toasted garlic.',
+    prepMinutes: 10,
+    cookMinutes: 15,
+    servings: 4,
+    tags: ['30-mins', 'vegetarian'],
+    ingredients: ['1 lb spaghetti', '2 tbsp unsalted butter', '1/2 tsp kosher salt'],
+    steps: ['Boil spaghetti until al dente.', 'Toss with warm garlic butter.'],
+    notes: 'Reserve 1/2 cup pasta water before draining.',
+    favorite: true,
+    createdAt: '2026-11-26T10:00:00.000Z',
+    updatedMs: 1764150000000,
+  };
+
+  assert.equal(slugifyFilename(sample.title), 'garlic-butter-pasta');
+  assert.equal(recipeToFilename(sample), 'garlic-butter-pasta.md');
+
+  const md = recipeToMarkdown(sample, { dividerName: 'Weeknight Staples' });
+  const parsed = parseMarkdownRecipe(md, { dividers: TEST_DIVIDERS });
+
+  assert.equal(parsed.id, sample.id);
+  assert.equal(parsed.title, sample.title);
+  assert.equal(parsed.dividerId, 'weeknight');
+  assert.equal(parsed.source, sample.source);
+  assert.equal(parsed.summary, sample.summary);
+  assert.equal(parsed.prepMinutes, 10);
+  assert.equal(parsed.cookMinutes, 15);
+  assert.equal(parsed.servings, 4);
+  assert.deepEqual(parsed.tags, ['30-mins', 'vegetarian']);
+  assert.deepEqual(parsed.ingredients, sample.ingredients);
+  assert.deepEqual(parsed.steps, sample.steps);
+  assert.equal(parsed.notes, sample.notes);
+  assert.equal(parsed.favorite, true);
+
+  const scaledMd = recipeToMarkdown(sample, { dividerName: 'Weeknight Staples', scaleFactor: 2 });
+  const parsedScaled = parseMarkdownRecipe(scaledMd, { dividers: TEST_DIVIDERS });
+  assert.equal(parsedScaled.servings, 8);
+  assert.equal(parsedScaled.ingredients[0], '2 lb spaghetti');
+  assert.equal(parsedScaled.ingredients[2], '1 tsp kosher salt');
+});
+
+test('parseMarkdownRecipe handles plain Markdown without frontmatter and uses filename fallback', () => {
+  const plainMd = `# Blueberry Muffins
+
+*Tender bakery-style muffins.*
+
+**Prep:** 15m | **Cook:** 25m | **Servings:** 12
+Source: Grandma's Binder
+
+## Ingredients
+
+- [ ] 2 cups all-purpose flour
+- [x] 1 cup fresh blueberries
+
+## Directions
+
+1. Whisk dry ingredients together.
+2. Fold in blueberries and bake at 375 F.
+
+## Notes
+
+Great with coarse sparkling sugar on top.
+`;
+
+  const parsed = parseMarkdownRecipe(plainMd, {
+    filename: 'blueberry-muffins.md',
+    dividers: TEST_DIVIDERS,
+  });
+
+  assert.equal(parsed.title, 'Blueberry Muffins');
+  assert.equal(parsed.prepMinutes, 15);
+  assert.equal(parsed.cookMinutes, 25);
+  assert.equal(parsed.servings, 12);
+  assert.equal(parsed.source, "Grandma's Binder");
+  assert.deepEqual(parsed.ingredients, ['2 cups all-purpose flour', '1 cup fresh blueberries']);
+  assert.deepEqual(parsed.steps, [
+    'Whisk dry ingredients together.',
+    'Fold in blueberries and bake at 375 F.',
+  ]);
+  assert.equal(parsed.notes, 'Great with coarse sparkling sugar on top.');
+
+  const noTitle = parseMarkdownRecipe('## Ingredients\n- 2 eggs\n## Steps\n1. Scramble.', {
+    filename: 'quick_scrambled_eggs.md',
+    dividers: TEST_DIVIDERS,
+  });
+  assert.equal(noTitle.title, 'Quick Scrambled Eggs');
+});
+
+test('createZipBytes writes valid ZIP headers, EOCD record, and deduplicates filenames', () => {
+  const bytes = createZipBytes([
+    { name: 'baking/cookies.md', content: '# Cookies\n' },
+    { name: 'baking/cookies.md', content: '# Cookies Batch 2\n' },
+  ]);
+
+  const view = new DataView(bytes.buffer);
+  assert.equal(view.getUint32(0, true), 0x04034b50); // Local file header signature
+  const text = new TextDecoder().decode(bytes);
+  assert.ok(text.includes('baking/cookies.md'));
+  assert.ok(text.includes('baking/cookies-2.md'));
+  assert.ok(text.includes('# Cookies Batch 2'));
+
+  // EOCD is the final 22 bytes (0 comment length)
+  assert.equal(view.getUint32(bytes.length - 22, true), 0x06054b50);
+  assert.equal(view.getUint16(bytes.length - 12, true), 2);
+});
+
+test('parseDurationMinutes and decodeHtmlEntities handle ISO-8601, human strings, and entities', () => {
+  assert.equal(parseDurationMinutes('PT1H30M'), 90);
+  assert.equal(parseDurationMinutes('PT45M'), 45);
+  assert.equal(parseDurationMinutes('P0DT0H20M'), 20);
+  assert.equal(parseDurationMinutes('1 hr 15 min'), 75);
+  assert.equal(decodeHtmlEntities('Mom&apos;s &amp; Dad&#39;s &#8217; &frac12; tsp at 350&deg;F'), "Mom's & Dad's ’ 1/2 tsp at 350°F");
+});
+
+test('parseHtmlRecipe extracts Schema.org JSON-LD @graph with HowToSection and HTML entities', () => {
+  const html = `
+    <!doctype html>
+    <html>
+      <head>
+        <title>Test Cake</title>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@graph": [
+              { "@type": "WebPage", "name": "Blog Post" },
+              {
+                "@type": "Recipe",
+                "name": "Classic Chocolate Cake &amp; Frosting",
+                "description": "Rich homemade chocolate cake.",
+                "author": { "@type": "Person", "name": "Chef Ada" },
+                "prepTime": "PT20M",
+                "cookTime": "PT35M",
+                "recipeYield": ["12", "12 slices"],
+                "recipeCategory": "Dessert",
+                "keywords": "chocolate, birthday, baking",
+                "recipeIngredient": [
+                  "2 cups all-purpose flour",
+                  "&frac12; cup cocoa powder"
+                ],
+                "recipeInstructions": [
+                  {
+                    "@type": "HowToSection",
+                    "name": "Cake Batter",
+                    "itemListElement": [
+                      { "@type": "HowToStep", "text": "Preheat oven to 350&deg;F." },
+                      { "@type": "HowToStep", "text": "Whisk flour and cocoa powder." }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        </script>
+      </head>
+      <body></body>
+    </html>
+  `;
+
+  const parsed = parseHtmlRecipe(html, {
+    sourceUrl: 'https://www.examplekitchen.com/chocolate-cake',
+    dividers: TEST_DIVIDERS,
+  });
+
+  assert.equal(parsed.title, 'Classic Chocolate Cake & Frosting');
+  assert.equal(parsed.dividerId, 'baking');
+  assert.equal(parsed.source, 'Chef Ada (examplekitchen.com)');
+  assert.equal(parsed.prepMinutes, 20);
+  assert.equal(parsed.cookMinutes, 35);
+  assert.equal(parsed.servings, 12);
+  assert.deepEqual(parsed.ingredients, ['2 cups all-purpose flour', '1/2 cup cocoa powder']);
+  assert.deepEqual(parsed.steps, [
+    '[Cake Batter] Preheat oven to 350°F.',
+    'Whisk flour and cocoa powder.',
+  ]);
+  assert.ok(parsed.tags.includes('chocolate'));
+  assert.equal(parsed.notes, 'Imported from: https://www.examplekitchen.com/chocolate-cake');
+});
+
+test('parseHtmlRecipe falls back to Microdata itemprop attributes', () => {
+  const html = `
+    <html>
+      <body>
+        <h1 itemprop="name">Crispy Roast Potatoes</h1>
+        <span itemprop="prepTime" datetime="PT15M">15m</span>
+        <span itemprop="cookTime" datetime="PT40M">40m</span>
+        <span itemprop="recipeYield">4 servings</span>
+        <ul>
+          <li itemprop="recipeIngredient">2 lb Yukon gold potatoes</li>
+          <li itemprop="recipeIngredient">3 tbsp olive oil</li>
+        </ul>
+        <ol itemprop="recipeInstructions">
+          <li>Cut potatoes into 1-inch chunks.</li>
+          <li>Roast at 425 F until crisp.</li>
+        </ol>
+      </body>
+    </html>
+  `;
+
+  const parsed = parseHtmlRecipe(html, { dividers: TEST_DIVIDERS });
+  assert.equal(parsed.title, 'Crispy Roast Potatoes');
+  assert.equal(parsed.prepMinutes, 15);
+  assert.equal(parsed.cookMinutes, 40);
+  assert.equal(parsed.servings, 4);
+  assert.deepEqual(parsed.ingredients, ['2 lb Yukon gold potatoes', '3 tbsp olive oil']);
+  assert.deepEqual(parsed.steps, [
+    'Cut potatoes into 1-inch chunks.',
+    'Roast at 425 F until crisp.',
+  ]);
+});
+
+test('parseTextRecipe converts both headed text and heading-less copied recipe text', () => {
+  const headedText = `
+    Jump to Recipe
+    Honey Mustard Chicken Salad
+    Prep Time: 15 min
+    Cook Time: 10 min
+    Servings: 4
+
+    Ingredients
+    ▢ 2 cups shredded chicken
+    ▢ 2 tbsp Dijon mustard
+    ▢ 1 tbsp honey
+
+    Directions
+    1. Whisk mustard and honey together.
+    Step 2: Toss with shredded chicken and greens.
+  `;
+
+  const parsedHeaded = parseTextRecipe(headedText, { dividers: TEST_DIVIDERS });
+  assert.equal(parsedHeaded.title, 'Honey Mustard Chicken Salad');
+  assert.equal(parsedHeaded.dividerId, 'sides');
+  assert.equal(parsedHeaded.prepMinutes, 15);
+  assert.equal(parsedHeaded.cookMinutes, 10);
+  assert.equal(parsedHeaded.servings, 4);
+  assert.deepEqual(parsedHeaded.ingredients, [
+    '2 cups shredded chicken',
+    '2 tbsp Dijon mustard',
+    '1 tbsp honey',
+  ]);
+  assert.deepEqual(parsedHeaded.steps, [
+    'Whisk mustard and honey together.',
+    'Toss with shredded chicken and greens.',
+  ]);
+
+  const unheadedText = `
+    Quick Garlic Toast
+    4 slices sourdough bread
+    2 tbsp softened butter
+    1 clove garlic, minced
+    Spread butter and garlic over the sourdough slices.
+    Broil for 2 minutes until golden and bubbling around the edges.
+  `;
+
+  const parsedUnheaded = parseTextRecipe(unheadedText, { dividers: TEST_DIVIDERS });
+  assert.equal(parsedUnheaded.title, 'Quick Garlic Toast');
+  assert.deepEqual(parsedUnheaded.ingredients, [
+    '4 slices sourdough bread',
+    '2 tbsp softened butter',
+    '1 clove garlic, minced',
+  ]);
+  assert.deepEqual(parsedUnheaded.steps, [
+    'Spread butter and garlic over the sourdough slices.',
+    'Broil for 2 minutes until golden and bubbling around the edges.',
+  ]);
+});
+
+test('parseImportedContent dispatches .json snapshots, Schema.org JSON, and .md files', () => {
+  const snapRes = parseImportedContent(
+    JSON.stringify({ dividers: TEST_DIVIDERS, recipes: [{ id: 'x', title: 'Soup' }] }),
+    { filename: 'backup.json', dividers: TEST_DIVIDERS }
+  );
+  assert.equal(snapRes.kind, 'snapshot');
+  assert.equal(snapRes.snapshot.recipes.length, 1);
+
+  const schemaRes = parseImportedContent(
+    JSON.stringify({
+      '@type': 'Recipe',
+      name: 'JSON Chili',
+      recipeIngredient: ['1 lb beef'],
+      recipeInstructions: ['Brown beef in pot.'],
+    }),
+    { filename: 'chili.json', dividers: TEST_DIVIDERS }
+  );
+  assert.equal(schemaRes.kind, 'recipe');
+  assert.equal(schemaRes.recipe.title, 'JSON Chili');
+
+  const mdRes = parseImportedContent('# Simple Tea\n\n## Ingredients\n- 1 tea bag\n## Steps\n1. Steep 3 minutes.', {
+    filename: 'tea.md',
+    dividers: TEST_DIVIDERS,
+  });
+  assert.equal(mdRes.kind, 'recipe');
+  assert.equal(mdRes.recipe.title, 'Simple Tea');
+});
+
+test('validateRecipeUrl normalizes domains and blocks unsafe schemes', () => {
+  assert.equal(validateRecipeUrl('www.budgetbytes.com/pasta/'), 'https://www.budgetbytes.com/pasta/');
+  assert.equal(validateRecipeUrl('https://example.com/recipe'), 'https://example.com/recipe');
+  assert.throws(() => validateRecipeUrl('javascript:alert(1)'), /Only http:\/\/ and https:\/\//);
+  assert.throws(() => validateRecipeUrl('file:///etc/passwd'), /Only http:\/\/ and https:\/\//);
 });

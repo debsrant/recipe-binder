@@ -112,6 +112,21 @@ export function renderSyncView({ syncSnapshot, recipes, dividers }) {
       </div>
 
       <div class="panel-card">
+        <h2>Markdown (.md) Export &amp; Import</h2>
+        <p class="muted">
+          Export every active recipe as an individual human-readable <code>.md</code> file (organized by divider folder inside a <code>.zip</code> archive), or import existing <code>.md</code> / <code>.txt</code> files.
+        </p>
+        <div class="backup-controls">
+          <button type="button" class="btn btn-primary" data-action="export-all-md-zip">Export All as Markdown (.zip)</button>
+
+          <label class="btn btn-outline file-upload-btn">
+            <span>Import Markdown Files (.md)</span>
+            <input type="file" id="sync-import-md-input" accept=".md,.markdown,.txt" multiple hidden />
+          </label>
+        </div>
+      </div>
+
+      <div class="panel-card">
         <h2>Offline JSON Backup & Restore</h2>
         <p class="muted">
           Currently storing <strong>${activeCount}</strong> active recipe cards across <strong>${dividerCount}</strong> binder dividers.

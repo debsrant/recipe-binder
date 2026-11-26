@@ -14,6 +14,10 @@ import {
   toggleFavorite,
 } from './db/database.js';
 import { normalizeDivider, normalizeRecipe, parseTagsInput } from './lib/collection.js';
+import { recipeToFilename, recipeToMarkdown, slugifyFilename } from './lib/markdown.js';
+import { parseImportedContent, parseTextRecipe } from './lib/recipeImport.js';
+import { fetchAndScrapeRecipeUrl } from './lib/webScraper.js';
+import { createZipBlob } from './lib/zip.js';
 import {
   forceSyncAllToCloud,
   getSyncSnapshot,
@@ -29,7 +33,15 @@ import { renderCollectionView } from './ui/collectionView.js';
 import { renderDetailView } from './ui/detailView.js';
 import { renderDividersView } from './ui/dividersView.js';
 import { renderEditorView } from './ui/editorView.js';
-import { createWakeLockController, downloadJson, escapeHtml, generateId } from './ui/helpers.js';
+import {
+  createWakeLockController,
+  downloadBlob,
+  downloadJson,
+  downloadTextFile,
+  escapeHtml,
+  generateId,
+} from './ui/helpers.js';
+import { renderImportView } from './ui/importView.js';
 import { renderSyncView } from './ui/syncView.js';
 
 const THEMES = [
@@ -63,14 +75,16 @@ function savePref(key, value) {
 
 const state = {
   ready: false,
-  view: 'collection', // 'collection' | 'detail' | 'editor' | 'dividers' | 'sync'
+  view: 'collection', // 'collection' | 'detail' | 'editor' | 'import' | 'dividers' | 'sync'
   theme: readSavedPref(PREF_KEYS.theme, ['parchment', 'slate', 'dusk'], 'parchment'),
   fontScale: readSavedPref(PREF_KEYS.fontScale, ['sm', 'md', 'lg'], 'md'),
+  detailLayout: readSavedPref(PREF_KEYS.detailLayout, ['binder', 'classic'], 'binder'),
   recipes: [],
   dividers: [],
   dividersUpdatedMs: 0,
   selectedRecipeId: null,
   editingRecipeId: null,
+  draftRecipe: null,
   activeDividerId: 'all',
   favoritesOnly: false,
   activeTag: '',
@@ -80,6 +94,12 @@ const state = {
   checkedIngredients: new Set(),
   checkedSteps: new Set(),
   wakeLockActive: false,
+  importUrl: '',
+  isScraping: false,
+  scrapeError: '',
+  pasteText: '',
+  importSaveImmediately: false,
+  isDragOver: false,
   syncSnapshot: getSyncSnapshot(),
   notice: null, // { tone: 'positive' | 'warning' | 'danger', text: string }
 };
@@ -160,6 +180,7 @@ function renderNavBar() {
     <nav class="primary-nav-bar" aria-label="Primary navigation">
       <div class="nav-tab-list">
         <button type="button" class="nav-tab ${collectionActive ? 'is-active' : ''}" data-action="nav-view" data-view="collection">Collection</button>
+        <button type="button" class="nav-tab ${state.view === 'import' ? 'is-active' : ''}" data-action="nav-view" data-view="import">Import</button>
         <button type="button" class="nav-tab ${state.view === 'dividers' ? 'is-active' : ''}" data-action="nav-view" data-view="dividers">Dividers</button>
         <button type="button" class="nav-tab ${state.view === 'sync' ? 'is-active' : ''}" data-action="nav-view" data-view="sync">Sync & Backup</button>
       </div>
@@ -192,6 +213,7 @@ function renderMainContent() {
       checkedSteps: state.checkedSteps,
       wakeLockActive: state.wakeLockActive,
       wakeLockSupported: wakeLock.isSupported,
+      detailLayout: state.detailLayout,
     });
   }
 
@@ -203,9 +225,20 @@ function renderMainContent() {
     const defaultDivider =
       state.activeDividerId !== 'all' ? state.activeDividerId : state.dividers[0]?.id || 'weeknight';
     return renderEditorView({
-      recipe: existing || { dividerId: defaultDivider },
+      recipe: existing || state.draftRecipe || { dividerId: defaultDivider },
       dividers: state.dividers,
       isNew,
+    });
+  }
+
+  if (state.view === 'import') {
+    return renderImportView({
+      urlInput: state.importUrl,
+      isScraping: state.isScraping,
+      scrapeError: state.scrapeError,
+      pasteText: state.pasteText,
+      saveImmediately: state.importSaveImmediately,
+      isDragOver: state.isDragOver,
     });
   }
 
@@ -232,6 +265,7 @@ function renderMainContent() {
     activeTag: state.activeTag,
     searchQuery: state.searchQuery,
     sortBy: state.sortBy,
+    isDragOver: state.isDragOver,
   });
 }
 
@@ -312,6 +346,9 @@ async function handleAction(action, target) {
     if (state.view === 'detail' && nextView !== 'detail') {
       resetCookSession(true);
     }
+    if (nextView !== 'editor') {
+      state.draftRecipe = null;
+    }
     state.view = nextView;
     render();
     return;
@@ -361,6 +398,7 @@ async function handleAction(action, target) {
 
   if (action === 'open-recipe') {
     resetCookSession(true);
+    state.draftRecipe = null;
     state.selectedRecipeId = target.dataset.recipeId || null;
     state.view = 'detail';
     render();
@@ -369,6 +407,7 @@ async function handleAction(action, target) {
 
   if (action === 'back-collection') {
     resetCookSession(true);
+    state.draftRecipe = null;
     state.selectedRecipeId = null;
     state.view = 'collection';
     render();
@@ -378,6 +417,7 @@ async function handleAction(action, target) {
   if (action === 'new-recipe') {
     resetCookSession(true);
     state.editingRecipeId = null;
+    state.draftRecipe = null;
     state.view = 'editor';
     render();
     return;
@@ -385,6 +425,7 @@ async function handleAction(action, target) {
 
   if (action === 'edit-recipe') {
     resetCookSession(true);
+    state.draftRecipe = null;
     state.editingRecipeId = target.dataset.recipeId || state.selectedRecipeId;
     state.view = 'editor';
     render();
@@ -392,6 +433,7 @@ async function handleAction(action, target) {
   }
 
   if (action === 'cancel-edit') {
+    state.draftRecipe = null;
     state.view = state.editingRecipeId && state.selectedRecipeId ? 'detail' : 'collection';
     state.editingRecipeId = null;
     render();
@@ -419,6 +461,7 @@ async function handleAction(action, target) {
       await pushRecipeToCloud(copy, state.dividers[0]?.id);
       state.selectedRecipeId = copy.id;
       state.editingRecipeId = copy.id;
+      state.draftRecipe = null;
       state.view = 'editor';
       setNotice('positive', `Duplicated "${copy.title}". Make your edits and save.`);
     }
@@ -441,6 +484,96 @@ async function handleAction(action, target) {
       state.view = 'collection';
       setNotice('warning', `Deleted "${targetRec.title}".`);
     }
+    render();
+    return;
+  }
+
+  if (action === 'set-detail-layout') {
+    const nextLayout = target.dataset.layout === 'classic' ? 'classic' : 'binder';
+    state.detailLayout = nextLayout;
+    savePref(PREF_KEYS.detailLayout, nextLayout);
+    render();
+    return;
+  }
+
+  if (action === 'export-recipe-md') {
+    const id = target.dataset.recipeId || state.selectedRecipeId;
+    const recipe = state.recipes.find((r) => r.id === id && !r.deleted);
+    if (!recipe) return;
+    const dividerName = state.dividers.find((d) => d.id === recipe.dividerId)?.name || 'Unfiled';
+    const md = recipeToMarkdown(recipe, { dividerName, scaleFactor: state.scaleFactor });
+    const filename = recipeToFilename(recipe);
+    downloadTextFile(filename, md, 'text/markdown;charset=utf-8');
+    setNotice('positive', `Exported "${filename}".`);
+    render();
+    return;
+  }
+
+  if (action === 'export-all-md-zip') {
+    const activeRecipes = state.recipes.filter((r) => r && !r.deleted);
+    if (activeRecipes.length === 0) {
+      setNotice('warning', 'No active recipes to export.');
+      render();
+      return;
+    }
+    const dividerMap = new Map(state.dividers.map((d) => [d.id, d.name]));
+    const entries = activeRecipes.map((recipe) => {
+      const dividerName = dividerMap.get(recipe.dividerId) || 'Unfiled';
+      const folder = slugifyFilename(dividerName, recipe.dividerId || 'unfiled');
+      return {
+        name: `${folder}/${recipeToFilename(recipe)}`,
+        content: recipeToMarkdown(recipe, { dividerName }),
+      };
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(`recipe-binder-markdown-${stamp}.zip`, createZipBlob(entries));
+    setNotice('positive', `Exported ${entries.length} Markdown recipe(s) in a .zip archive.`);
+    render();
+    return;
+  }
+
+  if (action === 'convert-pasted-text') {
+    const defaultDivider =
+      state.activeDividerId !== 'all' ? state.activeDividerId : state.dividers[0]?.id || 'weeknight';
+    try {
+      const parsed = parseTextRecipe(state.pasteText, {
+        dividers: state.dividers,
+        fallbackDividerId: defaultDivider,
+      });
+      state.draftRecipe = parsed;
+      state.editingRecipeId = null;
+      state.view = 'editor';
+      setNotice('positive', `Converted "${parsed.title}" — review and save to your binder.`);
+    } catch (err) {
+      setNotice('warning', err.message || 'Could not convert pasted text.');
+    }
+    render();
+    return;
+  }
+
+  if (action === 'paste-clipboard') {
+    if (!navigator.clipboard?.readText) {
+      setNotice('warning', 'Clipboard read is not available in this browser — paste directly into the box with Ctrl+V.');
+      render();
+      return;
+    }
+    try {
+      const clipText = await navigator.clipboard.readText();
+      if (!clipText || !clipText.trim()) {
+        setNotice('warning', 'Clipboard is empty.');
+      } else {
+        state.pasteText = clipText;
+        setNotice('positive', 'Pasted text from clipboard. Click "Convert to Recipe" when ready.');
+      }
+    } catch {
+      setNotice('warning', 'Clipboard access was denied — click inside the text box and press Ctrl+V.');
+    }
+    render();
+    return;
+  }
+
+  if (action === 'clear-paste-text') {
+    state.pasteText = '';
     render();
     return;
   }
@@ -613,6 +746,108 @@ async function handleAction(action, target) {
   }
 }
 
+async function importBackupSnapshot(parsed, mode = 'merge') {
+  if (!Array.isArray(parsed?.recipes)) {
+    throw new Error('Backup JSON must include a recipes array.');
+  }
+
+  if (mode === 'replace') {
+    if (!window.confirm('Replace all local recipes and dividers with this backup file?')) {
+      return null;
+    }
+    const snap = await replaceAllData(parsed);
+    applySnapshotToState(snap);
+    if (state.syncSnapshot.user) {
+      await forceSyncAllToCloud(snap).catch(() => {});
+    }
+    return {
+      mode: 'replace',
+      activeCount: snap.recipes.filter((r) => !r.deleted).length,
+    };
+  }
+
+  const local = await getSnapshot();
+  const { mergeCollectionSnapshots } = await import('./lib/collection.js');
+  const merged = mergeCollectionSnapshots(local, parsed);
+  const snap = await applyMergedSnapshot(merged);
+  applySnapshotToState(snap);
+  if (state.syncSnapshot.user) {
+    await forceSyncAllToCloud(snap).catch(() => {});
+  }
+  return {
+    mode: 'merge',
+    activeCount: snap.recipes.filter((r) => !r.deleted).length,
+  };
+}
+
+async function handleImportedFiles(fileList) {
+  const files = Array.from(fileList || []).filter(Boolean);
+  if (files.length === 0) return;
+
+  const fallbackDividerId =
+    state.activeDividerId !== 'all' ? state.activeDividerId : state.dividers[0]?.id || 'weeknight';
+  const importedRecipes = [];
+  let mergedSnapshots = 0;
+  const failed = [];
+
+  for (const file of files) {
+    try {
+      const content = await file.text();
+      const result = parseImportedContent(content, {
+        filename: file.name,
+        dividers: state.dividers,
+        fallbackDividerId,
+      });
+
+      if (result.kind === 'snapshot') {
+        await importBackupSnapshot(result.snapshot, 'merge');
+        mergedSnapshots += 1;
+      } else if (result.kind === 'recipe') {
+        importedRecipes.push(result.recipe);
+      }
+    } catch (err) {
+      failed.push(`${file.name}: ${err?.message || 'Unrecognized format'}`);
+    }
+  }
+
+  if (files.length === 1 && importedRecipes.length === 1 && !state.importSaveImmediately) {
+    state.draftRecipe = importedRecipes[0];
+    state.editingRecipeId = null;
+    state.view = 'editor';
+    setNotice('positive', `Loaded "${importedRecipes[0].title}" from ${files[0].name} — review and save.`);
+    render();
+    return;
+  }
+
+  if (importedRecipes.length > 0) {
+    const existingIds = new Set(state.recipes.map((r) => r.id));
+    for (const draft of importedRecipes) {
+      const id = draft.id && !existingIds.has(draft.id) ? draft.id : draft.id || generateId('rec');
+      const saved = await saveRecipe({
+        ...draft,
+        id,
+        createdAt: draft.createdAt || new Date().toISOString(),
+      });
+      existingIds.add(saved.id);
+      await pushRecipeToCloud(saved, fallbackDividerId);
+    }
+    applySnapshotToState(await getSnapshot());
+  }
+
+  if (importedRecipes.length > 0 || mergedSnapshots > 0) {
+    state.draftRecipe = null;
+    state.view = 'collection';
+    const summaryParts = [];
+    if (importedRecipes.length > 0) summaryParts.push(`imported ${importedRecipes.length} recipe(s)`);
+    if (mergedSnapshots > 0) summaryParts.push(`merged ${mergedSnapshots} backup(s)`);
+    if (failed.length > 0) summaryParts.push(`${failed.length} skipped`);
+    setNotice(failed.length > 0 ? 'warning' : 'positive', `Successfully ${summaryParts.join(', ')}.`);
+  } else if (failed.length > 0) {
+    setNotice('danger', `Import failed — ${failed[0]}`);
+  }
+  render();
+}
+
 document.addEventListener('click', (event) => {
   const actionEl = event.target.closest('[data-action]');
   if (!actionEl) return;
@@ -621,7 +856,8 @@ document.addEventListener('click', (event) => {
     action === 'search-input' ||
     action === 'sort-change' ||
     action === 'toggle-ingredient-check' ||
-    action === 'toggle-step-check'
+    action === 'toggle-step-check' ||
+    action === 'toggle-save-immediately'
   ) {
     return;
   }
@@ -633,6 +869,15 @@ document.addEventListener('input', (event) => {
   if (target.dataset.action === 'search-input') {
     state.searchQuery = target.value;
     render();
+    return;
+  }
+  if (target.id === 'scrape-url-input') {
+    state.importUrl = target.value;
+    state.scrapeError = '';
+    return;
+  }
+  if (target.id === 'paste-recipe-textarea') {
+    state.pasteText = target.value;
   }
 });
 
@@ -642,6 +887,11 @@ document.addEventListener('change', async (event) => {
   if (target.dataset.action === 'sort-change') {
     state.sortBy = target.value || 'updated';
     render();
+    return;
+  }
+
+  if (target.dataset.action === 'toggle-save-immediately') {
+    state.importSaveImmediately = Boolean(target.checked);
     return;
   }
 
@@ -667,37 +917,26 @@ document.addEventListener('change', async (event) => {
     return;
   }
 
+  if (target.id === 'import-files-input' || target.id === 'sync-import-md-input') {
+    try {
+      await handleImportedFiles(target.files);
+    } finally {
+      target.value = '';
+    }
+    return;
+  }
+
   if (target.id === 'import-backup-input') {
     const file = target.files?.[0];
     if (!file) return;
     const mode = document.getElementById('import-mode-select')?.value || 'merge';
     try {
       const parsed = JSON.parse(await file.text());
-      if (!Array.isArray(parsed?.recipes)) {
-        throw new Error('Backup JSON must include a recipes array.');
-      }
-
-      if (mode === 'replace') {
-        if (!window.confirm('Replace all local recipes and dividers with this backup file?')) {
-          target.value = '';
-          return;
-        }
-        const snap = await replaceAllData(parsed);
-        applySnapshotToState(snap);
-        if (state.syncSnapshot.user) {
-          await forceSyncAllToCloud(snap).catch(() => {});
-        }
-        setNotice('positive', `Replaced binder with ${snap.recipes.filter((r) => !r.deleted).length} recipe(s).`);
-      } else {
-        const local = await getSnapshot();
-        const { mergeCollectionSnapshots } = await import('./lib/collection.js');
-        const merged = mergeCollectionSnapshots(local, parsed);
-        const snap = await applyMergedSnapshot(merged);
-        applySnapshotToState(snap);
-        if (state.syncSnapshot.user) {
-          await forceSyncAllToCloud(snap).catch(() => {});
-        }
-        setNotice('positive', `Merged backup into binder (${snap.recipes.filter((r) => !r.deleted).length} active recipe(s)).`);
+      const res = await importBackupSnapshot(parsed, mode);
+      if (res?.mode === 'replace') {
+        setNotice('positive', `Replaced binder with ${res.activeCount} recipe(s).`);
+      } else if (res?.mode === 'merge') {
+        setNotice('positive', `Merged backup into binder (${res.activeCount} active recipe(s)).`);
       }
     } catch (err) {
       setNotice('danger', `Backup import failed: ${err.message}`);
@@ -710,6 +949,36 @@ document.addEventListener('change', async (event) => {
 
 document.addEventListener('submit', async (event) => {
   const form = event.target;
+
+  if (form.id === 'scrape-url-form') {
+    event.preventDefault();
+    const urlInput = form.querySelector('#scrape-url-input');
+    const url = String(urlInput?.value ?? state.importUrl ?? '').trim();
+    state.importUrl = url;
+    state.isScraping = true;
+    state.scrapeError = '';
+    render();
+
+    const fallbackDividerId =
+      state.activeDividerId !== 'all' ? state.activeDividerId : state.dividers[0]?.id || 'weeknight';
+
+    try {
+      const parsed = await fetchAndScrapeRecipeUrl(url, {
+        dividers: state.dividers,
+        fallbackDividerId,
+      });
+      state.isScraping = false;
+      state.draftRecipe = parsed;
+      state.editingRecipeId = null;
+      state.view = 'editor';
+      setNotice('positive', `Imported "${parsed.title}" from website — review and save.`);
+    } catch (err) {
+      state.isScraping = false;
+      state.scrapeError = err?.message || 'Failed to scrape recipe webpage.';
+    }
+    render();
+    return;
+  }
 
   if (form.id === 'recipe-editor-form') {
     event.preventDefault();
@@ -738,6 +1007,7 @@ document.addEventListener('submit', async (event) => {
     applySnapshotToState(await getSnapshot());
     await pushRecipeToCloud(saved, state.dividers[0]?.id);
     state.editingRecipeId = null;
+    state.draftRecipe = null;
     state.selectedRecipeId = saved.id;
     state.view = 'detail';
     setNotice('positive', `Saved "${saved.title}".`);
@@ -782,6 +1052,53 @@ document.addEventListener('submit', async (event) => {
       setNotice('danger', err.message);
       render();
     }
+  }
+});
+
+let dragDepth = 0;
+
+function hasFileTransfer(event) {
+  const types = event.dataTransfer?.types;
+  if (!types) return false;
+  return Array.from(types).includes('Files');
+}
+
+window.addEventListener('dragenter', (event) => {
+  if (!hasFileTransfer(event)) return;
+  event.preventDefault();
+  dragDepth += 1;
+  if ((state.view === 'import' || state.view === 'collection') && !state.isDragOver) {
+    state.isDragOver = true;
+    render();
+  }
+});
+
+window.addEventListener('dragover', (event) => {
+  if (!hasFileTransfer(event)) return;
+  event.preventDefault();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy';
+  }
+});
+
+window.addEventListener('dragleave', (event) => {
+  if (!hasFileTransfer(event)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0 && state.isDragOver) {
+    state.isDragOver = false;
+    render();
+  }
+});
+
+window.addEventListener('drop', async (event) => {
+  if (!hasFileTransfer(event)) return;
+  event.preventDefault();
+  dragDepth = 0;
+  state.isDragOver = false;
+  if (state.view === 'import' || state.view === 'collection') {
+    await handleImportedFiles(event.dataTransfer?.files);
+  } else {
+    render();
   }
 });
 

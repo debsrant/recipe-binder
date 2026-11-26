@@ -53,12 +53,14 @@ When asked to update `GEMINI.md` or sync project progress:
 | `VITE_FIREBASE_STORAGE_BUCKET` | Optional Firebase Storage bucket | `.env.example` / `src/config.js` |
 | `VITE_FIREBASE_MESSAGING_SENDER_ID` | Optional Firebase Messaging sender ID | `.env.example` / `src/config.js` |
 | `VITE_FIREBASE_APP_ID` | Optional Firebase App ID | `.env.example` / `src/config.js` |
+| `VITE_RECIPE_PROXY_URL` | Optional custom URL proxy for static hosting web-recipe scraping | `.env.example` / `src/config.js` |
 | `localhost:5176` | Vite local dev server (`strictPort: true`, `dev:lan` for kitchen devices) | `vite.config.js` |
 | `localhost:4174` | Vite PWA preview server (`strictPort: true`, `preview:lan` for kitchen devices) | `vite.config.js` |
 
 ### 6. Architectural Decisions & Changelog
 *(AI: Append a dated 1-line note whenever a new library, schema change, or structural pattern is introduced.)*
 * `2026-11-26`: Initialized project scaffold, multi-root workspace, Dexie IndexedDB + VitePWA offline shell, Phase 1 Recipe Cards & Dividers UI, pure-JS scaling/collection modules with `node --test` suite, and optional Firebase Firestore cross-device sync.
+* `2026-11-26`: Added Classic Sheet view & traditional `@media print` cookbook typography, single `.md` export/import + zero-dependency `.zip` bulk Markdown export, local Vite `/api/fetch-recipe` proxy + JSON-LD/Microdata URL scraper, and drag-and-drop file + copy-paste text recipe conversion.
 
 ### 7. Dev-Hub Runbook Integration
 * **Extracting Runbooks (`../dev-hub/runbooks/<topic>.md`):** When asked to *"turn this into a runbook"*, extract reusable, step-by-step terminal commands and configuration checklists, replacing project-specific names with `<placeholders>`.

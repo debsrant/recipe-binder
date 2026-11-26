@@ -9,6 +9,7 @@ export function renderCollectionView({
   activeTag,
   searchQuery,
   sortBy,
+  isDragOver = false,
 }) {
   const activeRecipes = (recipes || []).filter((r) => r && !r.deleted);
   const dividerMap = new Map((dividers || []).map((d) => [d.id, d.name]));
@@ -156,12 +157,20 @@ export function renderCollectionView({
                 ? '<button type="button" class="btn btn-secondary" data-action="clear-filters">Clear Filters</button>'
                 : ''
             }
+            <button type="button" class="btn btn-outline" data-action="nav-view" data-view="import">+ Import</button>
             <button type="button" class="btn btn-primary" data-action="new-recipe">+ New Recipe</button>
           </div>
         </div>`;
 
+  const dropBannerHtml = isDragOver
+    ? `<div class="collection-drop-banner" role="status">
+        Drop <code>.md</code>, <code>.txt</code>, or <code>.json</code> recipe files to import into your binder
+      </div>`
+    : '';
+
   return `
     <section class="collection-shell">
+      ${dropBannerHtml}
       <div class="binder-tabs-bar" role="tablist" aria-label="Binder Dividers">
         ${dividerTabsHtml}
       </div>
@@ -186,6 +195,7 @@ export function renderCollectionView({
               <option value="time" ${sortBy === 'time' ? 'selected' : ''}>Total Time</option>
               <option value="favorite" ${sortBy === 'favorite' ? 'selected' : ''}>Favorites First</option>
             </select>
+            <button type="button" class="btn btn-outline" data-action="nav-view" data-view="import">+ Import</button>
             <button type="button" class="btn btn-primary" data-action="new-recipe">+ New Recipe</button>
           </div>
         </div>
