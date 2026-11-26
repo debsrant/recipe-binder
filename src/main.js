@@ -1784,8 +1784,9 @@ document.addEventListener('change', async (event) => {
 
 document.addEventListener('submit', async (event) => {
   const form = event.target;
+  const formId = form.getAttribute?.('id') || '';
 
-  if (form.id === 'scrape-url-form') {
+  if (formId === 'scrape-url-form') {
     event.preventDefault();
     const urlInput = form.querySelector('#scrape-url-input');
     const url = String(urlInput?.value ?? state.importUrl ?? '').trim();
@@ -1815,7 +1816,7 @@ document.addEventListener('submit', async (event) => {
     return;
   }
 
-  if (form.id === 'recipe-editor-form') {
+  if (formId === 'recipe-editor-form') {
     event.preventDefault();
     const draft = readEditorFormIntoDraft();
     if (!draft) return;
@@ -1849,7 +1850,7 @@ document.addEventListener('submit', async (event) => {
     return;
   }
 
-  if (form.id === 'add-divider-form') {
+  if (formId === 'add-divider-form') {
     event.preventDefault();
     const input = form.querySelector('input[name="name"]');
     const name = String(input?.value || '').trim();
@@ -1876,7 +1877,7 @@ document.addEventListener('submit', async (event) => {
     return;
   }
 
-  if (form.id === 'ref-substitution-form') {
+  if (formId === 'ref-substitution-form') {
     event.preventDefault();
     const fd = new FormData(form);
     const existingId = form.dataset.subId || '';
@@ -1898,7 +1899,7 @@ document.addEventListener('submit', async (event) => {
     return;
   }
 
-  if (form.id === 'ref-technique-form') {
+  if (formId === 'ref-technique-form') {
     event.preventDefault();
     const fd = new FormData(form);
     const existingId = form.dataset.techId || '';
@@ -1923,7 +1924,7 @@ document.addEventListener('submit', async (event) => {
     return;
   }
 
-  if (form.id === 'ref-flavor-form') {
+  if (formId === 'ref-flavor-form') {
     event.preventDefault();
     const fd = new FormData(form);
     const existingId = form.dataset.flavorId || '';
@@ -1948,11 +1949,11 @@ document.addEventListener('submit', async (event) => {
     return;
   }
 
-  if (form.id === 'mealprep-freezer-form') {
+  if (formId === 'mealprep-freezer-form') {
     event.preventDefault();
     try {
       const fd = new FormData(form);
-      const existingId = String(fd.get('id') || '').trim();
+      const existingId = String(form.dataset.freezerId || '').trim();
       const title = String(fd.get('title') || '').trim();
       if (!title) {
         setNotice('warning', 'Please enter a dish name before saving to inventory.');
@@ -1993,11 +1994,11 @@ document.addEventListener('submit', async (event) => {
     return;
   }
 
-  if (form.id === 'mealprep-template-form') {
+  if (formId === 'mealprep-template-form') {
     event.preventDefault();
     try {
       const fd = new FormData(form);
-      const existingId = String(fd.get('id') || '').trim();
+      const existingId = String(form.dataset.templateId || '').trim();
       const derivatives = String(fd.get('derivativesText') || '')
         .split(/\r?\n/)
         .map((line) => line.trim())
@@ -2042,7 +2043,7 @@ document.addEventListener('submit', async (event) => {
     return;
   }
 
-  if (form.id === 'email-auth-form') {
+  if (formId === 'email-auth-form') {
     event.preventDefault();
     const email = document.getElementById('auth-email')?.value || '';
     const password = document.getElementById('auth-password')?.value || '';

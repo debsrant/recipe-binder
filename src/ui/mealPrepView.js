@@ -254,8 +254,7 @@ function renderFreezerTab({
 
       <aside class="panel-card mealprep-form-col no-print">
         <h3>${editingItem ? 'Edit Stored Entry' : 'Log Freezer / Leftover Batch'}</h3>
-        <form id="mealprep-freezer-form" class="stacked-form">
-          <input type="hidden" name="id" value="${escapeHtml(editingItem?.id || '')}" />
+        <form id="mealprep-freezer-form" class="stacked-form" data-freezer-id="${escapeHtml(editingItem?.id || '')}">
 
           <div class="form-field">
             <label for="freezer-recipe-select">Link Binder Recipe (optional)</label>
@@ -729,8 +728,7 @@ function renderTemplatesTab({
 
       <aside class="panel-card mealprep-form-col no-print">
         <h3>${editingTemplate ? 'Edit Batch Plan' : 'New "Cook Once, Eat Thrice" Plan'}</h3>
-        <form id="mealprep-template-form" class="stacked-form">
-          <input type="hidden" name="id" value="${escapeHtml(editingTemplate?.id || '')}" />
+        <form id="mealprep-template-form" class="stacked-form" data-template-id="${escapeHtml(editingTemplate?.id || '')}">
 
           <div class="form-field">
             <label for="template-title">Plan Name</label>
