@@ -79,6 +79,7 @@ const state = {
   theme: readSavedPref(PREF_KEYS.theme, ['parchment', 'slate', 'dusk'], 'parchment'),
   fontScale: readSavedPref(PREF_KEYS.fontScale, ['sm', 'md', 'lg'], 'md'),
   detailLayout: readSavedPref(PREF_KEYS.detailLayout, ['binder', 'classic'], 'binder'),
+  printMethodsMode: readSavedPref(PREF_KEYS.printMethodsMode, ['selected', 'all'], 'selected'),
   recipes: [],
   dividers: [],
   dividersUpdatedMs: 0,
@@ -91,6 +92,7 @@ const state = {
   searchQuery: '',
   sortBy: 'updated',
   scaleFactor: 1,
+  activeMethodIndex: 0,
   checkedIngredients: new Set(),
   checkedSteps: new Set(),
   wakeLockActive: false,
@@ -104,6 +106,25 @@ const state = {
   notice: null, // { tone: 'positive' | 'warning' | 'danger', text: string }
 };
 
+let noticeTimer = null;
+const NOTICE_DURATIONS = {
+  positive: 4500,
+  warning: 6500,
+  danger: 9000,
+};
+
+function clearNoticeBannerDom() {
+  if (noticeTimer) {
+    clearTimeout(noticeTimer);
+    noticeTimer = null;
+  }
+  state.notice = null;
+  const banner = document.querySelector('.notice-banner');
+  if (banner) {
+    banner.remove();
+  }
+}
+
 function applyRootPreferences() {
   document.documentElement.setAttribute('data-theme', state.theme);
   document.documentElement.setAttribute('data-font-scale', state.fontScale);
@@ -112,13 +133,21 @@ function applyRootPreferences() {
 const wakeLock = createWakeLockController((active, errorMsg) => {
   state.wakeLockActive = active;
   if (errorMsg) {
-    state.notice = { tone: 'warning', text: errorMsg };
+    setNotice('warning', errorMsg);
   }
   render();
 });
 
-function setNotice(tone, text) {
+function setNotice(tone, text, durationMs) {
+  if (noticeTimer) {
+    clearTimeout(noticeTimer);
+    noticeTimer = null;
+  }
   state.notice = { tone, text };
+  const delay = durationMs ?? NOTICE_DURATIONS[tone] ?? 5000;
+  if (delay > 0) {
+    noticeTimer = setTimeout(clearNoticeBannerDom, delay);
+  }
 }
 
 function getSyncPillLabel(snap) {
@@ -214,6 +243,8 @@ function renderMainContent() {
       wakeLockActive: state.wakeLockActive,
       wakeLockSupported: wakeLock.isSupported,
       detailLayout: state.detailLayout,
+      activeMethodIndex: state.activeMethodIndex,
+      printMethodsMode: state.printMethodsMode,
     });
   }
 
@@ -225,7 +256,7 @@ function renderMainContent() {
     const defaultDivider =
       state.activeDividerId !== 'all' ? state.activeDividerId : state.dividers[0]?.id || 'weeknight';
     return renderEditorView({
-      recipe: existing || state.draftRecipe || { dividerId: defaultDivider },
+      recipe: state.draftRecipe || existing || { dividerId: defaultDivider },
       dividers: state.dividers,
       isNew,
     });
@@ -313,11 +344,55 @@ function applySnapshotToState(snapshot) {
 
 function resetCookSession(releaseLock = true) {
   state.scaleFactor = 1;
+  state.activeMethodIndex = 0;
   state.checkedIngredients = new Set();
   state.checkedSteps = new Set();
   if (releaseLock && wakeLock.isActive()) {
     wakeLock.release();
   }
+}
+
+function readEditorFormIntoDraft() {
+  const form = document.getElementById('recipe-editor-form');
+  if (!form) return null;
+  const fd = new FormData(form);
+  const existingId = form.dataset.recipeId || '';
+  const existing = existingId ? state.recipes.find((r) => r.id === existingId) : null;
+
+  const methodBlocks = Array.from(form.querySelectorAll('[data-method-block]'));
+  const methods = methodBlocks.map((block, idx) => {
+    const id = block.dataset.methodId || `method-${idx + 1}`;
+    const name = String(block.querySelector('[data-method-field="name"]')?.value || '').trim();
+    const cookRaw = Number(block.querySelector('[data-method-field="cookMinutes"]')?.value || 0);
+    const cookMinutes = Number.isFinite(cookRaw) && cookRaw >= 0 ? Math.round(cookRaw) : 0;
+    const note = String(block.querySelector('[data-method-field="note"]')?.value || '').trim();
+    const steps = String(block.querySelector('[data-method-field="steps"]')?.value || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    return { id, name, cookMinutes, note, steps };
+  });
+
+  return {
+    id: existingId,
+    title: String(fd.get('title') || ''),
+    dividerId: String(fd.get('dividerId') || state.dividers[0]?.id || 'weeknight'),
+    source: String(fd.get('source') || ''),
+    summary: String(fd.get('summary') || ''),
+    prepMinutes: Number(fd.get('prepMinutes') || 0),
+    cookMinutes: methods[0]?.cookMinutes ?? 0,
+    servings: Number(fd.get('servings') || 4),
+    tags: parseTagsInput(fd.get('tags')),
+    ingredients: String(fd.get('ingredients') || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean),
+    steps: methods[0]?.steps || [],
+    methods: methods.length > 0 ? methods : [{ id: 'method-1', name: '', cookMinutes: 0, note: '', steps: [] }],
+    notes: String(fd.get('notes') || ''),
+    favorite: fd.get('favorite') === 'on',
+    createdAt: existing?.createdAt || state.draftRecipe?.createdAt || '',
+  };
 }
 
 async function handleAction(action, target) {
@@ -336,8 +411,7 @@ async function handleAction(action, target) {
   }
 
   if (action === 'dismiss-notice') {
-    state.notice = null;
-    render();
+    clearNoticeBannerDom();
     return;
   }
 
@@ -492,6 +566,60 @@ async function handleAction(action, target) {
     const nextLayout = target.dataset.layout === 'classic' ? 'classic' : 'binder';
     state.detailLayout = nextLayout;
     savePref(PREF_KEYS.detailLayout, nextLayout);
+    render();
+    return;
+  }
+
+  if (action === 'select-method') {
+    const nextIdx = Number(target.dataset.methodIndex || 0);
+    if (Number.isFinite(nextIdx) && nextIdx >= 0) {
+      state.activeMethodIndex = nextIdx;
+      render();
+    }
+    return;
+  }
+
+  if (action === 'set-print-methods-mode') {
+    const nextMode = target.dataset.printMode === 'all' ? 'all' : 'selected';
+    state.printMethodsMode = nextMode;
+    savePref(PREF_KEYS.printMethodsMode, nextMode);
+    render();
+    return;
+  }
+
+  if (action === 'add-editor-method') {
+    const draft = readEditorFormIntoDraft();
+    if (!draft) return;
+    draft.methods.push({
+      id: generateId('m'),
+      name: '',
+      cookMinutes: 0,
+      note: '',
+      steps: [],
+    });
+    state.draftRecipe = draft;
+    render();
+    return;
+  }
+
+  if (action === 'remove-editor-method') {
+    const idx = Number(target.dataset.methodIndex);
+    const draft = readEditorFormIntoDraft();
+    if (!draft || draft.methods.length <= 1 || !Number.isFinite(idx)) return;
+    draft.methods.splice(idx, 1);
+    state.draftRecipe = draft;
+    render();
+    return;
+  }
+
+  if (action === 'move-editor-method-up' || action === 'move-editor-method-down') {
+    const idx = Number(target.dataset.methodIndex);
+    const draft = readEditorFormIntoDraft();
+    if (!draft || !Number.isFinite(idx)) return;
+    const swapIdx = action === 'move-editor-method-up' ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= draft.methods.length) return;
+    [draft.methods[idx], draft.methods[swapIdx]] = [draft.methods[swapIdx], draft.methods[idx]];
+    state.draftRecipe = draft;
     render();
     return;
   }
@@ -907,11 +1035,12 @@ document.addEventListener('change', async (event) => {
   }
 
   if (target.dataset.action === 'toggle-step-check') {
-    const idx = Number(target.dataset.index);
+    const stepKey = target.dataset.stepKey || String(target.dataset.index || '');
+    if (!stepKey) return;
     if (target.checked) {
-      state.checkedSteps.add(idx);
+      state.checkedSteps.add(stepKey);
     } else {
-      state.checkedSteps.delete(idx);
+      state.checkedSteps.delete(stepKey);
     }
     render();
     return;
@@ -982,32 +1111,31 @@ document.addEventListener('submit', async (event) => {
 
   if (form.id === 'recipe-editor-form') {
     event.preventDefault();
-    const fd = new FormData(form);
+    const draft = readEditorFormIntoDraft();
+    if (!draft) return;
     const existingId = form.dataset.recipeId;
     const existing = existingId ? state.recipes.find((r) => r.id === existingId) : null;
     const id = existing?.id || generateId('rec');
 
+    const nonEmptySecondary = draft.methods.filter(
+      (m, idx) => idx === 0 || m.name || m.note || (m.steps && m.steps.length > 0)
+    );
+    const methods = nonEmptySecondary.length > 0 ? nonEmptySecondary : draft.methods.slice(0, 1);
+
     const saved = await saveRecipe({
+      ...draft,
       id,
-      title: fd.get('title'),
-      dividerId: fd.get('dividerId'),
-      source: fd.get('source'),
-      summary: fd.get('summary'),
-      prepMinutes: fd.get('prepMinutes'),
-      cookMinutes: fd.get('cookMinutes'),
-      servings: fd.get('servings'),
-      tags: parseTagsInput(fd.get('tags')),
-      ingredients: String(fd.get('ingredients') || '').split(/\r?\n/),
-      steps: String(fd.get('steps') || '').split(/\r?\n/),
-      notes: fd.get('notes'),
-      favorite: fd.get('favorite') === 'on',
-      createdAt: existing?.createdAt || new Date().toISOString(),
+      cookMinutes: methods[0]?.cookMinutes ?? 0,
+      steps: methods[0]?.steps || [],
+      methods,
+      createdAt: existing?.createdAt || draft.createdAt || new Date().toISOString(),
     });
 
     applySnapshotToState(await getSnapshot());
     await pushRecipeToCloud(saved, state.dividers[0]?.id);
     state.editingRecipeId = null;
     state.draftRecipe = null;
+    state.activeMethodIndex = 0;
     state.selectedRecipeId = saved.id;
     state.view = 'detail';
     setNotice('positive', `Saved "${saved.title}".`);

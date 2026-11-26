@@ -1,6 +1,33 @@
 import { parseTagsInput } from './collection.js';
-import { parseMarkdownRecipe } from './markdown.js';
+import { parseMarkdownRecipe, slugifyFilename } from './markdown.js';
 import { parseQuantityToken } from './scaling.js';
+
+const METHOD_KEYWORD_PATTERNS = [
+  { name: 'Instant Pot', re: /\b(?:instant\s*pot|pressure\s*cook(?:er|ing)?)\b/i },
+  { name: 'Slow Cooker', re: /\b(?:slow\s*cooker|crock[\s-]?pot)\b/i },
+  { name: 'Air Fryer', re: /\bair\s*fry(?:er|ing)?\b/i },
+  { name: 'Dutch Oven', re: /\bdutch\s*oven\b/i },
+  { name: 'Grill', re: /\bgrill(?:ed|ing)?\b/i },
+  { name: 'Griddle', re: /\bgriddle\b/i },
+  { name: 'Skillet', re: /\bskillet\b/i },
+  { name: 'Oven', re: /\b(?:preheat\s+oven|oven|bake|roast|broil)\b/i },
+  { name: 'Stovetop', re: /\b(?:stovetop|stove\s*top|simmer|boil|saut[eé]|saucepan)\b/i },
+  { name: 'No-Cook', re: /\bno[\s-]?cook\b/i },
+];
+
+/**
+ * Detects a common cooking method name (e.g. Instant Pot, Slow Cooker, Oven, Skillet) from text.
+ */
+export function detectCookingMethodName(candidateTexts) {
+  const haystack = (Array.isArray(candidateTexts) ? candidateTexts : [candidateTexts])
+    .filter(Boolean)
+    .join(' ');
+  if (!haystack.trim()) return '';
+  for (const entry of METHOD_KEYWORD_PATTERNS) {
+    if (entry.re.test(haystack)) return entry.name;
+  }
+  return '';
+}
 
 const NAMED_ENTITIES = {
   amp: '&',
@@ -298,6 +325,44 @@ function buildSourceLabel(authorRaw, sourceUrl) {
   return author || hostname || '';
 }
 
+function extractMethodSections(rawInstructions, fallbackCookMinutes = 0) {
+  if (!Array.isArray(rawInstructions)) return null;
+  const howToSections = rawInstructions.filter(
+    (item) =>
+      item &&
+      typeof item === 'object' &&
+      (String(item['@type'] || '').toLowerCase().includes('howtosection') ||
+        Array.isArray(item.itemListElement)) &&
+      item.name
+  );
+  if (howToSections.length < 2) return null;
+
+  const matchedMethods = [];
+  for (let idx = 0; idx < howToSections.length; idx += 1) {
+    const sec = howToSections[idx];
+    const secName = stripHtmlTags(sec.name || '');
+    const detected = detectCookingMethodName(secName);
+    if (!detected) continue;
+
+    const cleanName = secName
+      .replace(/\s*(?:method|instructions|directions|version)\s*$/i, '')
+      .trim() || detected;
+    const steps = flattenInstructions(sec.itemListElement || sec.steps || []);
+    const durationMatch = secName.match(/\(([^)]+)\)/);
+    const parsedCook = durationMatch ? parseDurationMinutes(durationMatch[1]) : 0;
+
+    matchedMethods.push({
+      id: slugifyFilename(cleanName, `method-${idx + 1}`),
+      name: cleanName.replace(/\s*\([^)]+\)\s*$/, '').trim() || detected,
+      cookMinutes: parsedCook || (idx === 0 ? fallbackCookMinutes : 0),
+      note: '',
+      steps,
+    });
+  }
+
+  return matchedMethods.length >= 2 ? matchedMethods : null;
+}
+
 function recipeFromJsonLdNode(node, { sourceUrl = '', dividers = [], fallbackDividerId = 'weeknight' } = {}) {
   const title = stripHtmlTags(node.name || node.headline || '') || 'Imported Recipe';
   const summary = stripHtmlTags(node.description || '').split('\n')[0] || '';
@@ -318,8 +383,6 @@ function recipeFromJsonLdNode(node, { sourceUrl = '', dividers = [], fallbackDiv
     .map((line) => stripHtmlTags(line).replace(/^[-*•▢☐]\s*/, '').trim())
     .filter(Boolean);
 
-  const steps = flattenInstructions(node.recipeInstructions);
-
   const tagInputs = [];
   const pushTags = (val) => {
     if (!val) return;
@@ -330,6 +393,18 @@ function recipeFromJsonLdNode(node, { sourceUrl = '', dividers = [], fallbackDiv
   pushTags(node.recipeCuisine);
   pushTags(node.keywords);
   const tags = parseTagsInput(tagInputs.join(',')).slice(0, 8);
+
+  const multiMethods = extractMethodSections(node.recipeInstructions, cookMinutes);
+  const steps = multiMethods ? multiMethods[0].steps : flattenInstructions(node.recipeInstructions);
+  const methods = multiMethods || [
+    {
+      id: 'method-1',
+      name: detectCookingMethodName([title, ...tags, ...steps]),
+      cookMinutes,
+      note: '',
+      steps,
+    },
+  ];
 
   const dividerId = guessDividerId(
     [title, node.recipeCategory, node.recipeCuisine, ...(tags || [])],
@@ -344,11 +419,12 @@ function recipeFromJsonLdNode(node, { sourceUrl = '', dividers = [], fallbackDiv
     summary,
     source,
     prepMinutes,
-    cookMinutes,
+    cookMinutes: methods[0].cookMinutes,
     servings,
     tags,
     ingredients,
     steps,
+    methods,
     notes: sourceUrl ? `Imported from: ${sourceUrl}` : '',
     favorite: false,
     deleted: false,
@@ -551,6 +627,26 @@ function titleFromFilename(filename) {
   return base.replace(/\b[a-z]/g, (ch) => ch.toUpperCase());
 }
 
+function parseTextMethodSubheading(line) {
+  const trimmed = String(line || '').trim();
+  if (!trimmed || trimmed.length >= 60) return null;
+  if (/^\d+[.)]\s+/.test(trimmed)) return null;
+
+  const isMarkdownSub = /^#{3,6}\s+/.test(trimmed);
+  const stripped = trimmed.replace(/^#{1,6}\s*/, '').replace(/[:*]+$/g, '').trim();
+  const durMatch = stripped.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+  const baseName = (durMatch ? durMatch[1] : stripped)
+    .replace(/\s+(?:instructions?|directions?|method|steps?|version)$/i, '')
+    .trim();
+
+  const detected = detectCookingMethodName(baseName);
+  if (!detected && !isMarkdownSub) return null;
+
+  const cleanName = detected && baseName.length <= 32 ? baseName : detected || baseName;
+  const cookMinutes = durMatch && /\d/.test(durMatch[2]) ? parseDurationMinutes(durMatch[2]) : 0;
+  return { name: cleanName, cookMinutes };
+}
+
 /**
  * Converts copied recipe text, Markdown, or HTML fragments into a normalized recipe draft.
  */
@@ -590,8 +686,23 @@ export function parseTextRecipe(
   let tags = [];
 
   const ingredients = [];
-  const steps = [];
+  const parsedMethods = [];
+  let currentMethod = null;
   const notesLines = [];
+
+  function ensureCurrentMethod() {
+    if (!currentMethod) {
+      currentMethod = {
+        id: `method-${parsedMethods.length + 1}`,
+        name: '',
+        cookMinutes: 0,
+        note: '',
+        steps: [],
+      };
+      parsedMethods.push(currentMethod);
+    }
+    return currentMethod;
+  }
 
   let section = 'header';
   let sawExplicitSection = false;
@@ -649,8 +760,20 @@ export function parseTextRecipe(
     }
 
     if (section === 'steps') {
+      const methodSub = parseTextMethodSubheading(line);
+      if (methodSub) {
+        currentMethod = {
+          id: slugifyFilename(methodSub.name, `method-${parsedMethods.length + 1}`),
+          name: methodSub.name,
+          cookMinutes: methodSub.cookMinutes,
+          note: '',
+          steps: [],
+        };
+        parsedMethods.push(currentMethod);
+        continue;
+      }
       const clean = cleanNumberedStep(line);
-      if (clean) steps.push(clean);
+      if (clean) ensureCurrentMethod().steps.push(clean);
       continue;
     }
 
@@ -667,11 +790,11 @@ export function parseTextRecipe(
         ingredients.push(cleanBullet(line));
       } else if (isLikelyStepLine(line)) {
         seenSteps = true;
-        steps.push(cleanNumberedStep(line));
+        ensureCurrentMethod().steps.push(cleanNumberedStep(line));
       } else if (!summary && !seenSteps && ingredients.length === 0) {
         summary = line;
       } else if (seenSteps) {
-        steps.push(cleanNumberedStep(line));
+        ensureCurrentMethod().steps.push(cleanNumberedStep(line));
       } else {
         ingredients.push(cleanBullet(line));
       }
@@ -687,6 +810,28 @@ export function parseTextRecipe(
   const finalTitle = title || titleFromFilename(filename) || 'Imported Recipe';
   const dividerId = guessDividerId([finalTitle, summary, ...tags], dividers, fallbackDividerId);
 
+  const methods =
+    parsedMethods.length > 0
+      ? parsedMethods
+      : [
+          {
+            id: 'method-1',
+            name: '',
+            cookMinutes,
+            note: '',
+            steps: [],
+          },
+        ];
+
+  if (methods.length === 1) {
+    if (!methods[0].name) {
+      methods[0].name = detectCookingMethodName([finalTitle, summary, ...tags, ...methods[0].steps]);
+    }
+    if (methods[0].cookMinutes === 0 && cookMinutes > 0) {
+      methods[0].cookMinutes = cookMinutes;
+    }
+  }
+
   return {
     id: '',
     title: finalTitle,
@@ -694,11 +839,12 @@ export function parseTextRecipe(
     summary,
     source,
     prepMinutes,
-    cookMinutes,
+    cookMinutes: methods[0].cookMinutes || cookMinutes,
     servings,
     tags,
     ingredients,
-    steps,
+    steps: methods[0].steps,
+    methods,
     notes: notesLines.join('\n').trim(),
     favorite: false,
     deleted: false,

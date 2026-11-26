@@ -61,6 +61,7 @@ When asked to update `GEMINI.md` or sync project progress:
 *(AI: Append a dated 1-line note whenever a new library, schema change, or structural pattern is introduced.)*
 * `2026-11-26`: Initialized project scaffold, multi-root workspace, Dexie IndexedDB + VitePWA offline shell, Phase 1 Recipe Cards & Dividers UI, pure-JS scaling/collection modules with `node --test` suite, and optional Firebase Firestore cross-device sync.
 * `2026-11-26`: Added Classic Sheet view & traditional `@media print` cookbook typography, single `.md` export/import + zero-dependency `.zip` bulk Markdown export, local Vite `/api/fetch-recipe` proxy + JSON-LD/Microdata URL scraper, and drag-and-drop file + copy-paste text recipe conversion.
+* `2026-11-26`: Added per-recipe multi-method cooking tabs (`methods[]`) with single-method instruction labels, Print Selected / Print All toggle, multi-method Markdown/HTML/text import parsing, and auto-dismissing alert banners.
 
 ### 7. Dev-Hub Runbook Integration
 * **Extracting Runbooks (`../dev-hub/runbooks/<topic>.md`):** When asked to *"turn this into a runbook"*, extract reusable, step-by-step terminal commands and configuration checklists, replacing project-specific names with `<placeholders>`.

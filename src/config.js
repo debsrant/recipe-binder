@@ -10,6 +10,7 @@ export const PREF_KEYS = {
   theme: 'recipe-binder:theme',
   fontScale: 'recipe-binder:fontScale',
   detailLayout: 'recipe-binder:detailLayout',
+  printMethodsMode: 'recipe-binder:printMethodsMode',
 };
 
 export const RECIPE_PROXY_URL = (env.VITE_RECIPE_PROXY_URL || '').trim();

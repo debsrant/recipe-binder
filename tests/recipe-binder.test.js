@@ -9,7 +9,9 @@ import {
 import {
   collectTags,
   filterAndSortRecipes,
+  getRecipeMethods,
   mergeCollectionSnapshots,
+  normalizeRecipe,
   parseTagsInput,
 } from '../src/lib/collection.js';
 import {
@@ -492,4 +494,223 @@ test('validateRecipeUrl normalizes domains and blocks unsafe schemes', () => {
   assert.equal(validateRecipeUrl('https://example.com/recipe'), 'https://example.com/recipe');
   assert.throws(() => validateRecipeUrl('javascript:alert(1)'), /Only http:\/\/ and https:\/\//);
   assert.throws(() => validateRecipeUrl('file:///etc/passwd'), /Only http:\/\/ and https:\/\//);
+});
+
+test('normalizeRecipe and getRecipeMethods support multi-method recipes and single-method fallback', () => {
+  const single = normalizeRecipe({
+    id: 's1',
+    title: 'Roast Carrots',
+    cookMinutes: 25,
+    methodName: 'Oven',
+    steps: ['Toss with oil.', 'Roast at 425 F.'],
+  });
+  assert.equal(single.methods.length, 1);
+  assert.equal(single.methods[0].name, 'Oven');
+  assert.equal(single.methods[0].cookMinutes, 25);
+  assert.deepEqual(single.steps, ['Toss with oil.', 'Roast at 425 F.']);
+
+  const multi = normalizeRecipe({
+    id: 'm1',
+    title: 'White Chicken Chili',
+    prepMinutes: 15,
+    methods: [
+      {
+        id: 'instant-pot',
+        name: 'Instant Pot',
+        cookMinutes: 35,
+        note: 'Use 1 cup broth minimum.',
+        steps: ['Saute onion.', 'Pressure cook 20 min.'],
+      },
+      {
+        id: 'slow-cooker',
+        name: 'Slow Cooker',
+        cookMinutes: 360,
+        note: 'Reduce broth to 1/2 cup.',
+        steps: ['Combine in crock.', 'Cook on Low 6 hours.'],
+      },
+    ],
+  });
+  assert.equal(multi.methods.length, 2);
+  assert.equal(multi.cookMinutes, 35);
+  assert.deepEqual(multi.steps, ['Saute onion.', 'Pressure cook 20 min.']);
+  assert.equal(getRecipeMethods(multi)[1].name, 'Slow Cooker');
+});
+
+test('filterAndSortRecipes searches method names, notes, and steps and sorts by shortest cook time', () => {
+  const recipes = [
+    normalizeRecipe({
+      id: 'slow-first',
+      title: 'Pulled Pork',
+      prepMinutes: 15,
+      methods: [
+        { name: 'Slow Cooker', cookMinutes: 480, note: 'Low and slow', steps: ['Cook 8 hours.'] },
+        { name: 'Instant Pot', cookMinutes: 75, note: 'Quick pressure release', steps: ['Pressure cook 60 min.'] },
+      ],
+    }),
+    normalizeRecipe({
+      id: 'pasta',
+      title: 'Quick Pasta',
+      prepMinutes: 10,
+      methods: [{ name: 'Stovetop', cookMinutes: 15, steps: ['Boil pasta.'] }],
+    }),
+    normalizeRecipe({
+      id: 'roast',
+      title: 'Slow Roast Beef',
+      prepMinutes: 15,
+      methods: [{ name: 'Oven', cookMinutes: 120, steps: ['Roast until tender.'] }],
+    }),
+  ];
+
+  assert.deepEqual(
+    filterAndSortRecipes(recipes, { query: 'instant pot' }).map((r) => r.id),
+    ['slow-first']
+  );
+  assert.deepEqual(
+    filterAndSortRecipes(recipes, { query: 'quick pressure release' }).map((r) => r.id),
+    ['slow-first']
+  );
+  assert.deepEqual(
+    filterAndSortRecipes(recipes, { sortBy: 'time' }).map((r) => r.id),
+    ['pasta', 'slow-first', 'roast']
+  );
+});
+
+test('recipeToMarkdown and parseMarkdownRecipe round-trip single-method names and multi-method sections', () => {
+  const singleOven = normalizeRecipe({
+    id: 'single-1',
+    title: 'Sheet Pan Salmon',
+    dividerId: 'weeknight',
+    prepMinutes: 10,
+    methods: [{ id: 'oven', name: 'Oven', cookMinutes: 18, note: '', steps: ['Season salmon.', 'Bake at 400 F.'] }],
+    ingredients: ['4 salmon fillets'],
+  });
+  const singleMd = recipeToMarkdown(singleOven, { dividerName: 'Weeknight Staples' });
+  assert.ok(singleMd.includes('method: "Oven"'));
+  assert.ok(singleMd.includes('### Oven (18m)'));
+  const parsedSingle = parseMarkdownRecipe(singleMd, { dividers: TEST_DIVIDERS });
+  assert.equal(parsedSingle.methods.length, 1);
+  assert.equal(parsedSingle.methods[0].name, 'Oven');
+  assert.equal(parsedSingle.methods[0].cookMinutes, 18);
+
+  const multiChili = normalizeRecipe({
+    id: 'multi-1',
+    title: 'Beef Chili',
+    dividerId: 'weeknight',
+    prepMinutes: 15,
+    ingredients: ['1 lb ground beef', '1 can kidney beans'],
+    methods: [
+      {
+        id: 'instant-pot',
+        name: 'Instant Pot',
+        cookMinutes: 35,
+        note: 'Keep 1 cup broth for pressure.',
+        steps: ['Brown beef on Saute.', 'Pressure cook 15 min.'],
+      },
+      {
+        id: 'slow-cooker',
+        name: 'Slow Cooker',
+        cookMinutes: 360,
+        note: 'Brown beef first for best flavor.',
+        steps: ['Add all ingredients to slow cooker.', 'Cook on Low 6 hours.'],
+      },
+    ],
+  });
+  const multiMd = recipeToMarkdown(multiChili, { dividerName: 'Weeknight Staples' });
+  assert.ok(multiMd.includes('### Instant Pot (35m)'));
+  assert.ok(multiMd.includes('> Note: Keep 1 cup broth for pressure.'));
+  assert.ok(multiMd.includes('### Slow Cooker (6h)'));
+
+  const parsedMulti = parseMarkdownRecipe(multiMd, { dividers: TEST_DIVIDERS });
+  assert.equal(parsedMulti.methods.length, 2);
+  assert.equal(parsedMulti.methods[0].name, 'Instant Pot');
+  assert.equal(parsedMulti.methods[0].cookMinutes, 35);
+  assert.equal(parsedMulti.methods[0].note, 'Keep 1 cup broth for pressure.');
+  assert.deepEqual(parsedMulti.methods[0].steps, ['Brown beef on Saute.', 'Pressure cook 15 min.']);
+  assert.equal(parsedMulti.methods[1].name, 'Slow Cooker');
+  assert.equal(parsedMulti.methods[1].cookMinutes, 360);
+  assert.equal(parsedMulti.methods[1].note, 'Brown beef first for best flavor.');
+  assert.deepEqual(parsedMulti.methods[1].steps, [
+    'Add all ingredients to slow cooker.',
+    'Cook on Low 6 hours.',
+  ]);
+});
+
+test('parseHtmlRecipe splits multi-method HowToSection blocks into separate cooking methods', () => {
+  const html = `
+    <html>
+      <head>
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "Recipe",
+            "name": "Shredded Chicken Tacos",
+            "prepTime": "PT10M",
+            "cookTime": "PT25M",
+            "recipeIngredient": ["2 lb chicken breast", "1 packet taco seasoning"],
+            "recipeInstructions": [
+              {
+                "@type": "HowToSection",
+                "name": "Instant Pot",
+                "itemListElement": [
+                  { "@type": "HowToStep", "text": "Place chicken and broth in pot." },
+                  { "@type": "HowToStep", "text": "Pressure cook 12 minutes." }
+                ]
+              },
+              {
+                "@type": "HowToSection",
+                "name": "Slow Cooker (4h)",
+                "itemListElement": [
+                  { "@type": "HowToStep", "text": "Place chicken in crock." },
+                  { "@type": "HowToStep", "text": "Cook on High 3-4 hours." }
+                ]
+              }
+            ]
+          }
+        </script>
+      </head>
+      <body></body>
+    </html>
+  `;
+
+  const parsed = parseHtmlRecipe(html, { dividers: TEST_DIVIDERS });
+  assert.equal(parsed.methods.length, 2);
+  assert.equal(parsed.methods[0].name, 'Instant Pot');
+  assert.equal(parsed.methods[0].cookMinutes, 25);
+  assert.equal(parsed.methods[1].name, 'Slow Cooker');
+  assert.equal(parsed.methods[1].cookMinutes, 240);
+});
+
+test('parseTextRecipe splits Instant Pot and Slow Cooker subheadings into separate cooking methods', () => {
+  const text = `
+    Creamy Chicken Soup
+    Prep: 15 min
+    Servings: 6
+
+    Ingredients
+    1 1/2 lb chicken thighs
+    4 cups chicken broth
+
+    Instructions
+    Instant Pot (30 min):
+    1. Saute veggies 5 minutes.
+    2. Pressure cook on High 10 minutes.
+    Slow Cooker (6 hr):
+    1. Add all ingredients to slow cooker.
+    2. Cook on Low 6 hours until chicken shreds easily.
+  `;
+
+  const parsed = parseTextRecipe(text, { dividers: TEST_DIVIDERS });
+  assert.equal(parsed.methods.length, 2);
+  assert.equal(parsed.methods[0].name, 'Instant Pot');
+  assert.equal(parsed.methods[0].cookMinutes, 30);
+  assert.deepEqual(parsed.methods[0].steps, [
+    'Saute veggies 5 minutes.',
+    'Pressure cook on High 10 minutes.',
+  ]);
+  assert.equal(parsed.methods[1].name, 'Slow Cooker');
+  assert.equal(parsed.methods[1].cookMinutes, 360);
+  assert.deepEqual(parsed.methods[1].steps, [
+    'Add all ingredients to slow cooker.',
+    'Cook on Low 6 hours until chicken shreds easily.',
+  ]);
 });

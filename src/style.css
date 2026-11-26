@@ -519,6 +519,19 @@ textarea {
   color: var(--primary);
 }
 
+.badge-method {
+  background: var(--pine-subtle);
+  border-color: var(--pine);
+  color: var(--pine);
+}
+
+.card-badges-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
 /* Tactile Binder Dividers */
 .binder-tabs-bar {
   display: flex;
@@ -1362,6 +1375,99 @@ textarea {
   font-size: 13.5px;
 }
 
+/* Cooking Methods (Tabs, Callouts & Editor Cards) */
+.method-tabs-bar {
+  max-width: 780px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.binder-spread ~ .method-tabs-bar,
+.detail-header-card + .method-tabs-bar {
+  max-width: none;
+}
+
+.method-tab.is-active {
+  border-color: var(--pine);
+  border-top-color: var(--pine);
+  color: var(--pine);
+}
+
+.method-note-callout {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  background: var(--pine-subtle);
+  border: 1px solid var(--positive-border);
+  border-left: 3px solid var(--pine);
+  border-radius: var(--radius);
+  font-size: 14.5px;
+}
+
+.classic-method-block {
+  margin-bottom: 18px;
+}
+
+.classic-method-block:last-child {
+  margin-bottom: 0;
+}
+
+.classic-method-block h3 {
+  margin: 0 0 8px;
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.classic-method-time {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.classic-method-note {
+  margin: 0 0 10px;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 14.5px;
+  color: var(--text-muted);
+}
+
+.method-editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.method-editor-card {
+  padding: 12px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.method-editor-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.method-editor-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.method-editor-actions {
+  display: flex;
+  gap: 6px;
+}
+
 /* Print Recipe Sheet */
 @page {
   margin: 0.6in;
@@ -1409,7 +1515,9 @@ textarea {
 
   .classic-kicker,
   .classic-source,
-  .classic-meta-sep {
+  .classic-meta-sep,
+  .classic-method-time,
+  .classic-method-note {
     color: #444444 !important;
   }
 
@@ -1431,6 +1539,12 @@ textarea {
     font-size: 13pt;
     color: #111111 !important;
     border-bottom: 0.75pt solid #333333;
+    break-after: avoid;
+  }
+
+  .classic-method-block h3 {
+    font-size: 11.5pt;
+    color: #111111 !important;
     break-after: avoid;
   }
 

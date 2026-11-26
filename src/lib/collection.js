@@ -50,14 +50,74 @@ function normalizeStringList(value) {
 }
 
 /**
+ * Normalizes a single cooking method entry (`{ id, name, cookMinutes, note, steps }`).
+ */
+export function normalizeMethod(input, index = 0, fallbackCookMinutes = 0) {
+  const name = String(input?.name || '').trim();
+  const rawId = String(input?.id || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9_-]/g, '');
+  const id = rawId || `method-${index + 1}`;
+  const cookRaw = input?.cookMinutes;
+  const cookNum =
+    cookRaw === undefined || cookRaw === null || cookRaw === ''
+      ? Number(fallbackCookMinutes)
+      : Number(cookRaw);
+  const cookMinutes = Number.isFinite(cookNum) && cookNum >= 0 ? Math.round(cookNum) : 0;
+
+  return {
+    id,
+    name,
+    cookMinutes,
+    note: String(input?.note || '').trim(),
+    steps: normalizeStringList(input?.steps),
+  };
+}
+
+/**
+ * Resolves the normalized array of cooking methods for a recipe, falling back to single-method fields.
+ */
+export function getRecipeMethods(recipe) {
+  const fallbackCookRaw = Number(recipe?.cookMinutes);
+  const fallbackCook =
+    Number.isFinite(fallbackCookRaw) && fallbackCookRaw >= 0 ? Math.round(fallbackCookRaw) : 0;
+
+  if (Array.isArray(recipe?.methods) && recipe.methods.length > 0) {
+    return recipe.methods.map((m, idx) => normalizeMethod(m, idx, idx === 0 ? fallbackCook : 0));
+  }
+
+  return [
+    normalizeMethod(
+      {
+        id: 'method-1',
+        name: recipe?.methodName || '',
+        cookMinutes: fallbackCook,
+        note: recipe?.methodNote || '',
+        steps: recipe?.steps || [],
+      },
+      0,
+      fallbackCook
+    ),
+  ];
+}
+
+function getMinCookMinutes(recipe) {
+  const methods = getRecipeMethods(recipe);
+  return Math.min(...methods.map((m) => m.cookMinutes || 0));
+}
+
+/**
  * Normalizes a recipe record into a consistent structure safe for storage and sync.
  */
 export function normalizeRecipe(input, fallbackDividerId = 'weeknight') {
   const nowIso = new Date().toISOString();
   const prepNum = Number(input?.prepMinutes);
-  const cookNum = Number(input?.cookMinutes);
   const servingsNum = Number(input?.servings);
   const updatedMsNum = Number(input?.updatedMs);
+  const methods = getRecipeMethods(input);
+  const primaryMethod = methods[0];
 
   return {
     id: String(input?.id || '').trim() || `rec-${Date.now()}`,
@@ -66,11 +126,12 @@ export function normalizeRecipe(input, fallbackDividerId = 'weeknight') {
     summary: String(input?.summary || '').trim(),
     source: String(input?.source || '').trim(),
     prepMinutes: Number.isFinite(prepNum) && prepNum >= 0 ? Math.round(prepNum) : 0,
-    cookMinutes: Number.isFinite(cookNum) && cookNum >= 0 ? Math.round(cookNum) : 0,
+    cookMinutes: primaryMethod.cookMinutes,
     servings: Number.isFinite(servingsNum) && servingsNum > 0 ? Number(servingsNum) : 4,
     tags: parseTagsInput(input?.tags || []),
     ingredients: normalizeStringList(input?.ingredients),
-    steps: normalizeStringList(input?.steps),
+    steps: primaryMethod.steps,
+    methods,
     notes: String(input?.notes || '').trim(),
     favorite: Boolean(input?.favorite),
     createdAt: String(input?.createdAt || nowIso),
@@ -96,6 +157,7 @@ export function filterAndSortRecipes(
     if (cleanTag && !(recipe.tags || []).includes(cleanTag)) return false;
 
     if (cleanQuery) {
+      const methods = getRecipeMethods(recipe);
       const haystack = [
         recipe.title,
         recipe.summary,
@@ -104,6 +166,7 @@ export function filterAndSortRecipes(
         ...(recipe.tags || []),
         ...(recipe.ingredients || []),
         ...(recipe.steps || []),
+        ...methods.flatMap((m) => [m.name, m.note, ...(m.steps || [])]),
       ]
         .join(' ')
         .toLowerCase();
@@ -119,8 +182,8 @@ export function filterAndSortRecipes(
       return a.title.localeCompare(b.title);
     }
     if (sortBy === 'time') {
-      const totalA = (a.prepMinutes || 0) + (a.cookMinutes || 0);
-      const totalB = (b.prepMinutes || 0) + (b.cookMinutes || 0);
+      const totalA = (a.prepMinutes || 0) + getMinCookMinutes(a);
+      const totalB = (b.prepMinutes || 0) + getMinCookMinutes(b);
       if (totalA !== totalB) return totalA - totalB;
       return a.title.localeCompare(b.title);
     }

@@ -1,4 +1,4 @@
-import { normalizeTag, parseTagsInput } from './collection.js';
+import { getRecipeMethods, normalizeTag, parseTagsInput } from './collection.js';
 import { formatQuantity, scaleIngredientLine } from './scaling.js';
 
 function yamlQuote(value) {
@@ -104,8 +104,9 @@ export function recipeToFilename(recipe) {
 export function recipeToMarkdown(recipe, { dividerName = '', scaleFactor = 1 } = {}) {
   const factor = Number(scaleFactor) > 0 && Number.isFinite(Number(scaleFactor)) ? Number(scaleFactor) : 1;
   const prep = Number(recipe?.prepMinutes || 0);
-  const cook = Number(recipe?.cookMinutes || 0);
-  const total = prep + cook;
+  const methods = getRecipeMethods(recipe);
+  const primaryCook = methods[0]?.cookMinutes ?? Number(recipe?.cookMinutes || 0);
+  const total = prep + primaryCook;
   const baseServings = Number(recipe?.servings) > 0 ? Number(recipe.servings) : 4;
   const scaledServingsNum = baseServings * factor;
   const scaledServingsLabel = formatQuantity(scaledServingsNum) || String(baseServings);
@@ -119,7 +120,12 @@ export function recipeToMarkdown(recipe, { dividerName = '', scaleFactor = 1 } =
   if (recipe?.source) fmLines.push(`source: ${yamlQuote(recipe.source)}`);
   if (recipe?.summary) fmLines.push(`summary: ${yamlQuote(recipe.summary)}`);
   fmLines.push(`prepMinutes: ${Math.max(0, Math.round(prep))}`);
-  fmLines.push(`cookMinutes: ${Math.max(0, Math.round(cook))}`);
+  fmLines.push(`cookMinutes: ${Math.max(0, Math.round(primaryCook))}`);
+  if (methods.length === 1 && methods[0].name) {
+    fmLines.push(`method: ${yamlQuote(methods[0].name)}`);
+  } else if (methods.length > 1) {
+    fmLines.push(`methods: [${methods.map((m) => yamlQuote(m.name || 'Method')).join(', ')}]`);
+  }
   fmLines.push(`servings: ${Number.isInteger(scaledServingsNum) ? scaledServingsNum : Number(scaledServingsNum.toFixed(2))}`);
   fmLines.push(`tags: [${tags.map((t) => yamlQuote(t)).join(', ')}]`);
   fmLines.push(`favorite: ${Boolean(recipe?.favorite)}`);
@@ -136,7 +142,7 @@ export function recipeToMarkdown(recipe, { dividerName = '', scaleFactor = 1 } =
 
   const metaParts = [
     `**Prep:** ${formatDurationCompact(prep)}`,
-    `**Cook:** ${formatDurationCompact(cook)}`,
+    `**Cook:** ${formatDurationCompact(primaryCook)}`,
     `**Total:** ${formatDurationCompact(total)}`,
     `**Servings:** ${scaledServingsLabel}${factor !== 1 ? ` (${factor}x)` : ''}`,
   ];
@@ -156,16 +162,26 @@ export function recipeToMarkdown(recipe, { dividerName = '', scaleFactor = 1 } =
     body.push('- (none listed)');
   }
 
-  body.push('', '## Instructions', '');
-  const steps = Array.isArray(recipe?.steps) ? recipe.steps : [];
-  if (steps.length > 0) {
-    steps.forEach((step, idx) => {
-      const clean = String(step || '').trim();
-      if (clean) body.push(`${idx + 1}. ${clean}`);
-    });
-  } else {
-    body.push('1. (none listed)');
-  }
+  body.push('', '## Instructions');
+  methods.forEach((method) => {
+    body.push('');
+    if (method.name) {
+      const cookLabel = method.cookMinutes > 0 ? ` (${formatDurationCompact(method.cookMinutes)})` : '';
+      body.push(`### ${method.name}${cookLabel}`, '');
+    }
+    if (method.note) {
+      body.push(`> Note: ${method.note}`, '');
+    }
+    const methodSteps = Array.isArray(method.steps) ? method.steps : [];
+    if (methodSteps.length > 0) {
+      methodSteps.forEach((step, idx) => {
+        const clean = String(step || '').trim();
+        if (clean) body.push(`${idx + 1}. ${clean}`);
+      });
+    } else {
+      body.push('1. (none listed)');
+    }
+  });
 
   if (recipe?.notes && String(recipe.notes).trim()) {
     body.push('', '## Notes', '', String(recipe.notes).trim());
@@ -262,6 +278,21 @@ function resolveDividerId(frontmatter, dividers, fallbackDividerId) {
   return fallbackDividerId || list[0]?.id || 'weeknight';
 }
 
+function parseMethodSubheading(rawHeading) {
+  const cleaned = String(rawHeading || '').replace(/[:*]+$/g, '').trim();
+  const durMatch = cleaned.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+  if (durMatch) {
+    const candidateDur = durMatch[2].trim();
+    if (/\d/.test(candidateDur)) {
+      return {
+        name: durMatch[1].trim(),
+        cookMinutes: parseMinutesValue(candidateDur),
+      };
+    }
+  }
+  return { name: cleaned, cookMinutes: 0 };
+}
+
 /**
  * Parses a Markdown recipe file (with or without YAML frontmatter) into a recipe draft object.
  */
@@ -292,8 +323,23 @@ export function parseMarkdownRecipe(
   let bodyTags = [];
 
   const ingredients = [];
-  const steps = [];
+  const parsedMethods = [];
+  let currentMethod = null;
   const notesLines = [];
+
+  function ensureCurrentMethod() {
+    if (!currentMethod) {
+      currentMethod = {
+        id: `method-${parsedMethods.length + 1}`,
+        name: '',
+        cookMinutes: 0,
+        note: '',
+        steps: [],
+      };
+      parsedMethods.push(currentMethod);
+    }
+    return currentMethod;
+  }
 
   let section = 'header';
   for (const rawLine of body.split('\n')) {
@@ -305,29 +351,45 @@ export function parseMarkdownRecipe(
       continue;
     }
 
-    const headingMatch = trimmed.match(/^#{2,6}\s+(.+)$/);
+    const headingMatch = trimmed.match(/^(#{2,6})\s+(.+)$/);
     if (headingMatch) {
-      const headingText = headingMatch[1].replace(/[:*]+$/g, '').trim().toLowerCase();
-      if (/^(ingredients?|what you need|shopping list)\b/.test(headingText)) {
-        section = 'ingredients';
+      const level = headingMatch[1].length;
+      const rawHeading = headingMatch[2].trim();
+      const headingText = rawHeading.replace(/[:*]+$/g, '').trim().toLowerCase();
+
+      if (level === 2 || section === 'header') {
+        if (/^(ingredients?|what you need|shopping list)\b/.test(headingText)) {
+          section = 'ingredients';
+          continue;
+        }
+        if (/^(instructions?|directions?|method|preparation|steps?|how to make)\b/.test(headingText)) {
+          section = 'steps';
+          continue;
+        }
+        if (/^(notes?|tips?|cook'?s(?:\s+margin)?\s+notes?|margin notes?|variations?)\b/.test(headingText)) {
+          section = 'notes';
+          continue;
+        }
+      }
+
+      if (section === 'ingredients') {
+        ingredients.push(`${rawHeading}:`);
         continue;
       }
-      if (/^(instructions?|directions?|method|preparation|steps?|how to make)\b/.test(headingText)) {
-        section = 'steps';
-        continue;
-      }
-      if (/^(notes?|tips?|cook'?s(?:\s+margin)?\s+notes?|margin notes?|variations?)\b/.test(headingText)) {
-        section = 'notes';
-        continue;
-      }
-      if (section === 'ingredients' || section === 'steps') {
-        const subheading = headingMatch[1].trim();
-        if (section === 'ingredients') ingredients.push(`${subheading}:`);
-        if (section === 'steps') steps.push(`${subheading}:`);
+      if (section === 'steps') {
+        const parsedSub = parseMethodSubheading(rawHeading);
+        currentMethod = {
+          id: slugifyFilename(parsedSub.name, `method-${parsedMethods.length + 1}`),
+          name: parsedSub.name,
+          cookMinutes: parsedSub.cookMinutes,
+          note: '',
+          steps: [],
+        };
+        parsedMethods.push(currentMethod);
         continue;
       }
       if (section === 'notes' && trimmed) {
-        notesLines.push(headingMatch[1].trim());
+        notesLines.push(rawHeading);
       }
       continue;
     }
@@ -388,8 +450,19 @@ export function parseMarkdownRecipe(
     }
 
     if (section === 'steps') {
+      const quoteMatch = trimmed.match(/^>\s*(.+)$/);
+      if (quoteMatch) {
+        const noteText = quoteMatch[1].replace(/^(?:note|method\s*note)\s*:\s*/i, '').trim();
+        if (noteText) {
+          const targetMethod = ensureCurrentMethod();
+          targetMethod.note = targetMethod.note ? `${targetMethod.note} ${noteText}` : noteText;
+        }
+        continue;
+      }
       const clean = cleanStepLine(trimmed);
-      if (clean && clean !== '(none listed)') steps.push(clean);
+      if (clean && clean !== '(none listed)') {
+        ensureCurrentMethod().steps.push(clean);
+      }
       continue;
     }
 
@@ -422,6 +495,28 @@ export function parseMarkdownRecipe(
     cookMinutes = bodyTotal;
   }
 
+  const methods =
+    parsedMethods.length > 0
+      ? parsedMethods
+      : [
+          {
+            id: 'method-1',
+            name: String(frontmatter.method || '').trim(),
+            cookMinutes,
+            note: '',
+            steps: [],
+          },
+        ];
+
+  if (methods.length === 1) {
+    if (!methods[0].name && frontmatter.method) {
+      methods[0].name = String(frontmatter.method).trim();
+    }
+    if (methods[0].cookMinutes === 0 && cookMinutes > 0) {
+      methods[0].cookMinutes = cookMinutes;
+    }
+  }
+
   const rawServings = frontmatter.servings ?? frontmatter.yield ?? bodyServings;
   const parsedServings =
     typeof rawServings === 'number'
@@ -429,13 +524,9 @@ export function parseMarkdownRecipe(
       : parseFloat(String(rawServings || '').match(/\d+(?:\.\d+)?/)?.[0] || '');
   const servings = Number.isFinite(parsedServings) && parsedServings > 0 ? parsedServings : 4;
 
-  const fmTags = frontmatter.tags
-    ? parseTagsInput(frontmatter.tags)
-    : bodyTags;
+  const fmTags = frontmatter.tags ? parseTagsInput(frontmatter.tags) : bodyTags;
   const normalizedTags = fmTags.map((t) => normalizeTag(t)).filter(Boolean);
-
   const notes = String(frontmatter.notes || notesLines.join('\n')).trim();
-
   const title =
     String(frontmatter.title || bodyTitle || titleFromFilename(filename) || 'Imported Recipe').trim();
 
@@ -446,11 +537,12 @@ export function parseMarkdownRecipe(
     summary: String(frontmatter.summary || frontmatter.description || bodySummary || '').trim(),
     source: String(frontmatter.source || frontmatter.url || frontmatter.author || bodySource || '').trim(),
     prepMinutes,
-    cookMinutes,
+    cookMinutes: methods[0].cookMinutes || cookMinutes,
     servings,
     tags: normalizedTags,
     ingredients,
-    steps,
+    steps: methods[0].steps,
+    methods,
     notes,
     favorite: Boolean(frontmatter.favorite),
     createdAt: String(frontmatter.createdAt || ''),

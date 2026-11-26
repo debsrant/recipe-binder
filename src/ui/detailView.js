@@ -1,3 +1,4 @@
+import { getRecipeMethods } from '../lib/collection.js';
 import { formatQuantity, scaleIngredientLine } from '../lib/scaling.js';
 import { escapeHtml, formatDateShort, formatMinutes } from './helpers.js';
 
@@ -11,17 +12,60 @@ function renderScaleButtons(scaleFactor) {
   }).join('');
 }
 
+function formatRangeMinutes(minVal, maxVal) {
+  if (minVal === maxVal) return formatMinutes(minVal);
+  return `${formatMinutes(minVal)}–${formatMinutes(maxVal)}`;
+}
+
+function renderMethodTabsBar(methods, activeMethodIndex) {
+  if (methods.length <= 1) return '';
+  return `
+    <div class="binder-tabs-bar method-tabs-bar no-print" role="tablist" aria-label="Cooking methods">
+      ${methods
+        .map((method, idx) => {
+          const active = idx === activeMethodIndex;
+          const label = method.name || `Method ${idx + 1}`;
+          return `<button
+            type="button"
+            class="binder-tab method-tab ${active ? 'is-active' : ''}"
+            role="tab"
+            aria-selected="${active ? 'true' : 'false'}"
+            data-action="select-method"
+            data-method-index="${idx}"
+          >
+            <span>${escapeHtml(label)}</span>
+            <span class="tab-count">${escapeHtml(formatMinutes(method.cookMinutes))}</span>
+          </button>`;
+        })
+        .join('')}
+    </div>
+  `;
+}
+
 function renderClassicSheet({
   recipe,
   dividerName,
   scaleFactor,
   scaledServings,
-  totalMin,
+  methods,
+  activeMethodIndex,
+  showAllMethods = false,
   extraClass = '',
 }) {
   const ingredients = recipe.ingredients || [];
-  const steps = recipe.steps || [];
   const twoColClass = ingredients.length >= 6 ? 'is-two-col' : '';
+  const activeMethod = methods[activeMethodIndex] || methods[0];
+  const prepMin = recipe.prepMinutes || 0;
+
+  const cookValues = methods.map((m) => m.cookMinutes || 0);
+  const minCook = Math.min(...cookValues);
+  const maxCook = Math.max(...cookValues);
+  const cookDisplay = showAllMethods
+    ? formatRangeMinutes(minCook, maxCook)
+    : formatMinutes(activeMethod.cookMinutes || 0);
+  const totalDisplay = showAllMethods
+    ? formatRangeMinutes(prepMin + minCook, prepMin + maxCook)
+    : formatMinutes(prepMin + (activeMethod.cookMinutes || 0));
 
   const ingredientsListHtml =
     ingredients.length > 0
@@ -32,12 +76,64 @@ function renderClassicSheet({
         </ul>`
       : '<p class="muted">No ingredients listed.</p>';
 
-  const stepsListHtml =
-    steps.length > 0
-      ? `<ol class="classic-steps-list">
-          ${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}
-        </ol>`
-      : '<p class="muted">No instructions listed.</p>';
+  let directionsHtml = '';
+  if (showAllMethods) {
+    directionsHtml = `
+      <section class="classic-section">
+        <h2>Directions</h2>
+        ${methods
+          .map((method, idx) => {
+            const label = method.name || `Method ${idx + 1}`;
+            const methodCook = method.cookMinutes || 0;
+            const stepsHtml =
+              (method.steps || []).length > 0
+                ? `<ol class="classic-steps-list">
+                    ${method.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}
+                  </ol>`
+                : '<p class="muted">No instructions listed.</p>';
+            return `
+              <div class="classic-method-block">
+                <h3>
+                  ${escapeHtml(label)}
+                  <span class="classic-method-time">(Cook: ${escapeHtml(
+                    formatMinutes(methodCook)
+                  )} · Total: ${escapeHtml(formatMinutes(prepMin + methodCook))})</span>
+                </h3>
+                ${
+                  method.note
+                    ? `<p class="classic-method-note"><strong>Note:</strong> ${escapeHtml(method.note)}</p>`
+                    : ''
+                }
+                ${stepsHtml}
+              </div>
+            `;
+          })
+          .join('')}
+      </section>
+    `;
+  } else {
+    const methodLabel = activeMethod.name || 'Standard';
+    const stepsListHtml =
+      (activeMethod.steps || []).length > 0
+        ? `<ol class="classic-steps-list">
+            ${activeMethod.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}
+          </ol>`
+        : '<p class="muted">No instructions listed.</p>';
+
+    directionsHtml = `
+      <section class="classic-section">
+        <h2>Directions — ${escapeHtml(methodLabel)}</h2>
+        ${
+          activeMethod.note
+            ? `<p class="classic-method-note"><strong>${escapeHtml(
+                methodLabel
+              )} Note:</strong> ${escapeHtml(activeMethod.note)}</p>`
+            : ''
+        }
+        ${stepsListHtml}
+      </section>
+    `;
+  }
 
   const tagsLine =
     (recipe.tags || []).length > 0
@@ -64,11 +160,11 @@ function renderClassicSheet({
             : ''
         }
         <div class="classic-meta-bar">
-          <span><strong>Prep:</strong> ${escapeHtml(formatMinutes(recipe.prepMinutes))}</span>
+          <span><strong>Prep:</strong> ${escapeHtml(formatMinutes(prepMin))}</span>
           <span class="classic-meta-sep" aria-hidden="true">·</span>
-          <span><strong>Cook:</strong> ${escapeHtml(formatMinutes(recipe.cookMinutes))}</span>
+          <span><strong>Cook:</strong> ${escapeHtml(cookDisplay)}</span>
           <span class="classic-meta-sep" aria-hidden="true">·</span>
-          <span><strong>Total:</strong> ${escapeHtml(formatMinutes(totalMin))}</span>
+          <span><strong>Total:</strong> ${escapeHtml(totalDisplay)}</span>
           <span class="classic-meta-sep" aria-hidden="true">·</span>
           <span><strong>Yield:</strong> ${escapeHtml(scaledServings)} servings${
             scaleFactor !== 1 ? ` (${scaleFactor}x)` : ''
@@ -81,10 +177,7 @@ function renderClassicSheet({
         ${ingredientsListHtml}
       </section>
 
-      <section class="classic-section">
-        <h2>Directions</h2>
-        ${stepsListHtml}
-      </section>
+      ${directionsHtml}
 
       ${
         recipe.notes && String(recipe.notes).trim()
@@ -109,6 +202,8 @@ export function renderDetailView({
   wakeLockActive,
   wakeLockSupported,
   detailLayout = 'binder',
+  activeMethodIndex = 0,
+  printMethodsMode = 'selected',
 }) {
   if (!recipe || recipe.deleted) {
     return `
@@ -120,12 +215,39 @@ export function renderDetailView({
     `;
   }
 
+  const methods = getRecipeMethods(recipe);
+  const methodIdx = Math.min(Math.max(0, Number(activeMethodIndex) || 0), methods.length - 1);
+  const activeMethod = methods[methodIdx];
+  const hasMultipleMethods = methods.length > 1;
+  const printAllMethods = hasMultipleMethods && printMethodsMode === 'all';
+
   const dividerName = (dividers || []).find((d) => d.id === recipe.dividerId)?.name || 'Unfiled';
-  const totalMin = (recipe.prepMinutes || 0) + (recipe.cookMinutes || 0);
+  const activeCookMin = activeMethod.cookMinutes || 0;
+  const totalMin = (recipe.prepMinutes || 0) + activeCookMin;
   const scaledServings = formatQuantity((recipe.servings || 4) * scaleFactor) || String(recipe.servings || 4);
   const hasChecks = (checkedIngredients?.size || 0) > 0 || (checkedSteps?.size || 0) > 0;
   const scaleButtonsHtml = renderScaleButtons(scaleFactor);
   const isClassic = detailLayout === 'classic';
+  const methodTabsHtml = renderMethodTabsBar(methods, methodIdx);
+
+  const printToggleHtml = hasMultipleMethods
+    ? `<div class="seg-control" role="group" aria-label="Print methods option">
+        <button
+          type="button"
+          class="seg-btn ${!printAllMethods ? 'is-active' : ''}"
+          data-action="set-print-methods-mode"
+          data-print-mode="selected"
+          title="Print only the currently selected cooking method"
+        >Print: Selected</button>
+        <button
+          type="button"
+          class="seg-btn ${printAllMethods ? 'is-active' : ''}"
+          data-action="set-print-methods-mode"
+          data-print-mode="all"
+          title="Print all cooking methods together"
+        >Print: All</button>
+      </div>`
+    : '';
 
   const actionBarHtml = `
     <div class="detail-action-bar no-print">
@@ -169,6 +291,7 @@ export function renderDetailView({
         <button type="button" class="btn btn-outline" data-action="export-recipe-md" data-recipe-id="${escapeHtml(
           recipe.id
         )}">Export .md</button>
+        ${printToggleHtml}
         <button type="button" class="btn btn-primary" data-action="print-recipe">Print Recipe</button>
         <button type="button" class="btn btn-danger-outline" data-action="delete-recipe" data-recipe-id="${escapeHtml(
           recipe.id
@@ -177,19 +300,45 @@ export function renderDetailView({
     </div>
   `;
 
-  const classicSheetHtml = renderClassicSheet({
-    recipe,
-    dividerName,
-    scaleFactor,
-    scaledServings,
-    totalMin,
-    extraClass: isClassic ? '' : 'print-only',
-  });
-
   if (isClassic) {
+    const classicBodyHtml = printAllMethods
+      ? `
+        ${renderClassicSheet({
+          recipe,
+          dividerName,
+          scaleFactor,
+          scaledServings,
+          methods,
+          activeMethodIndex: methodIdx,
+          showAllMethods: false,
+          extraClass: 'no-print',
+        })}
+        ${renderClassicSheet({
+          recipe,
+          dividerName,
+          scaleFactor,
+          scaledServings,
+          methods,
+          activeMethodIndex: methodIdx,
+          showAllMethods: true,
+          extraClass: 'print-only',
+        })}
+      `
+      : renderClassicSheet({
+          recipe,
+          dividerName,
+          scaleFactor,
+          scaledServings,
+          methods,
+          activeMethodIndex: methodIdx,
+          showAllMethods: false,
+          extraClass: '',
+        });
+
     return `
       <section class="detail-shell">
         ${actionBarHtml}
+        ${methodTabsHtml}
         <div class="classic-scale-bar no-print">
           <span class="classic-scale-label">Scale Batch:</span>
           <div class="seg-control" role="group" aria-label="Scale recipe">
@@ -197,7 +346,7 @@ export function renderDetailView({
           </div>
           <span class="muted classic-scale-hint">Formatted for traditional cookbook reading &amp; printing</span>
         </div>
-        ${classicSheetHtml}
+        ${classicBodyHtml}
       </section>
     `;
   }
@@ -224,16 +373,17 @@ export function renderDetailView({
       : '<li class="muted">No ingredients listed.</li>';
 
   const stepsHtml =
-    (recipe.steps || []).length > 0
-      ? recipe.steps
+    (activeMethod.steps || []).length > 0
+      ? activeMethod.steps
           .map((step, index) => {
-            const checked = checkedSteps?.has(index);
+            const stepKey = `${methodIdx}:${index}`;
+            const checked = checkedSteps?.has(stepKey);
             return `<li class="step-item ${checked ? 'is-checked' : ''}">
               <label class="step-label">
                 <input
                   type="checkbox"
                   data-action="toggle-step-check"
-                  data-index="${index}"
+                  data-step-key="${escapeHtml(stepKey)}"
                   ${checked ? 'checked' : ''}
                 />
                 <span class="step-num">${index + 1}.</span>
@@ -257,6 +407,19 @@ export function renderDetailView({
       </div>`
     : '';
 
+  const activeMethodBadgeLabel = activeMethod.name || 'Standard';
+
+  const printSheetHtml = renderClassicSheet({
+    recipe,
+    dividerName,
+    scaleFactor,
+    scaledServings,
+    methods,
+    activeMethodIndex: methodIdx,
+    showAllMethods: printAllMethods,
+    extraClass: 'print-only',
+  });
+
   return `
     <section class="detail-shell">
       ${actionBarHtml}
@@ -264,7 +427,10 @@ export function renderDetailView({
       <div class="no-print">
         <article class="panel-card detail-header-card">
           <div class="detail-header-top">
-            <span class="badge badge-divider">${escapeHtml(dividerName)}</span>
+            <div class="card-badges-group">
+              <span class="badge badge-divider">${escapeHtml(dividerName)}</span>
+              <span class="badge badge-method">${escapeHtml(activeMethodBadgeLabel)}</span>
+            </div>
             <span class="detail-updated">Updated ${escapeHtml(formatDateShort(recipe.updatedMs))}</span>
           </div>
 
@@ -287,8 +453,8 @@ export function renderDetailView({
               <span class="kpi-value">${escapeHtml(formatMinutes(recipe.prepMinutes))}</span>
             </div>
             <div class="kpi-box">
-              <span class="kpi-label">Cook</span>
-              <span class="kpi-value">${escapeHtml(formatMinutes(recipe.cookMinutes))}</span>
+              <span class="kpi-label">Cook (${escapeHtml(activeMethodBadgeLabel)})</span>
+              <span class="kpi-value">${escapeHtml(formatMinutes(activeCookMin))}</span>
             </div>
             <div class="kpi-box">
               <span class="kpi-label">Total</span>
@@ -308,6 +474,8 @@ export function renderDetailView({
 
           ${tagsHtml}
         </article>
+
+        ${methodTabsHtml}
 
         <div class="binder-spread">
           <div class="spread-left">
@@ -339,7 +507,17 @@ export function renderDetailView({
 
           <div class="spread-right">
             <section class="panel-card">
-              <h2>Instructions</h2>
+              <div class="section-header-row">
+                <h2>Instructions</h2>
+                <span class="badge badge-method">${escapeHtml(activeMethodBadgeLabel)}</span>
+              </div>
+              ${
+                activeMethod.note
+                  ? `<p class="method-note-callout"><strong>${escapeHtml(
+                      activeMethodBadgeLabel
+                    )} Note:</strong> ${escapeHtml(activeMethod.note)}</p>`
+                  : ''
+              }
               <ol class="steps-list">
                 ${stepsHtml}
               </ol>
@@ -348,7 +526,7 @@ export function renderDetailView({
         </div>
       </div>
 
-      ${classicSheetHtml}
+      ${printSheetHtml}
     </section>
   `;
 }

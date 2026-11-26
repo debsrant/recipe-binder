@@ -1,5 +1,10 @@
-import { collectTags, filterAndSortRecipes } from '../lib/collection.js';
+import { collectTags, filterAndSortRecipes, getRecipeMethods } from '../lib/collection.js';
 import { escapeHtml, formatMinutes } from './helpers.js';
+
+function formatRangeMinutes(minVal, maxVal) {
+  if (minVal === maxVal) return formatMinutes(minVal);
+  return `${formatMinutes(minVal)}–${formatMinutes(maxVal)}`;
+}
 
 export function renderCollectionView({
   recipes,
@@ -77,7 +82,19 @@ export function renderCollectionView({
       ? `<div class="recipe-grid">
           ${visibleRecipes
             .map((recipe) => {
-              const totalMin = (recipe.prepMinutes || 0) + (recipe.cookMinutes || 0);
+              const prepMin = recipe.prepMinutes || 0;
+              const methods = getRecipeMethods(recipe);
+              const cookValues = methods.map((m) => m.cookMinutes || 0);
+              const minCook = Math.min(...cookValues);
+              const maxCook = Math.max(...cookValues);
+              const cookLabel = formatRangeMinutes(minCook, maxCook);
+              const totalLabel = formatRangeMinutes(prepMin + minCook, prepMin + maxCook);
+              const methodNames = methods.map((m) => m.name).filter(Boolean);
+              const methodBadgeHtml =
+                methodNames.length > 0
+                  ? `<span class="badge badge-method">${escapeHtml(methodNames.join(' · '))}</span>`
+                  : '';
+
               const dividerName = dividerMap.get(recipe.dividerId) || 'Unfiled';
               const tagsHtml = (recipe.tags || [])
                 .slice(0, 4)
@@ -91,7 +108,10 @@ export function renderCollectionView({
 
               return `<article class="recipe-card">
                 <div class="recipe-card-top">
-                  <span class="badge badge-divider">${escapeHtml(dividerName)}</span>
+                  <div class="card-badges-group">
+                    <span class="badge badge-divider">${escapeHtml(dividerName)}</span>
+                    ${methodBadgeHtml}
+                  </div>
                   <button
                     type="button"
                     class="btn btn-sm ${recipe.favorite ? 'btn-fav-active' : 'btn-outline'}"
@@ -116,15 +136,15 @@ export function renderCollectionView({
                 <dl class="recipe-meta-row">
                   <div>
                     <dt>Prep</dt>
-                    <dd>${escapeHtml(formatMinutes(recipe.prepMinutes))}</dd>
+                    <dd>${escapeHtml(formatMinutes(prepMin))}</dd>
                   </div>
                   <div>
                     <dt>Cook</dt>
-                    <dd>${escapeHtml(formatMinutes(recipe.cookMinutes))}</dd>
+                    <dd>${escapeHtml(cookLabel)}</dd>
                   </div>
                   <div>
                     <dt>Total</dt>
-                    <dd>${escapeHtml(formatMinutes(totalMin))}</dd>
+                    <dd>${escapeHtml(totalLabel)}</dd>
                   </div>
                   <div>
                     <dt>Serves</dt>
