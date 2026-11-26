@@ -145,9 +145,10 @@ export function normalizeRecipe(input, fallbackDividerId = 'weeknight') {
  */
 export function filterAndSortRecipes(
   recipes,
-  { dividerId = 'all', favoritesOnly = false, tag = '', query = '', sortBy = 'updated' } = {}
+  { dividerId = 'all', favoritesOnly = false, method = '', tag = '', query = '', sortBy = 'updated' } = {}
 ) {
   const cleanQuery = String(query || '').trim().toLowerCase();
+  const cleanMethod = String(method || '').trim().toLowerCase();
   const cleanTag = normalizeTag(tag);
 
   const filtered = (recipes || []).filter((recipe) => {
@@ -156,8 +157,15 @@ export function filterAndSortRecipes(
     if (dividerId && dividerId !== 'all' && recipe.dividerId !== dividerId) return false;
     if (cleanTag && !(recipe.tags || []).includes(cleanTag)) return false;
 
+    const methods = getRecipeMethods(recipe);
+    if (
+      cleanMethod &&
+      !methods.some((m) => String(m.name || '').trim().toLowerCase() === cleanMethod)
+    ) {
+      return false;
+    }
+
     if (cleanQuery) {
-      const methods = getRecipeMethods(recipe);
       const haystack = [
         recipe.title,
         recipe.summary,
@@ -197,6 +205,33 @@ export function filterAndSortRecipes(
   });
 
   return sorted;
+}
+
+/**
+ * Aggregates unique cooking method names and recipe counts across active (non-deleted) recipes.
+ */
+export function collectMethods(recipes) {
+  const counts = new Map();
+  for (const recipe of recipes || []) {
+    if (!recipe || recipe.deleted) continue;
+    const seenForRecipe = new Set();
+    for (const method of getRecipeMethods(recipe)) {
+      const rawName = String(method?.name || '').trim();
+      if (!rawName) continue;
+      const key = rawName.toLowerCase();
+      if (seenForRecipe.has(key)) continue;
+      seenForRecipe.add(key);
+      const existing = counts.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        counts.set(key, { method: rawName, count: 1 });
+      }
+    }
+  }
+  return Array.from(counts.values()).sort((a, b) =>
+    b.count !== a.count ? b.count - a.count : a.method.localeCompare(b.method)
+  );
 }
 
 /**

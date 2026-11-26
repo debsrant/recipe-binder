@@ -7,6 +7,7 @@ import {
   scaleIngredientLine,
 } from '../src/lib/scaling.js';
 import {
+  collectMethods,
   collectTags,
   filterAndSortRecipes,
   getRecipeMethods,
@@ -713,4 +714,42 @@ test('parseTextRecipe splits Instant Pot and Slow Cooker subheadings into separa
     'Add all ingredients to slow cooker.',
     'Cook on Low 6 hours until chicken shreds easily.',
   ]);
+});
+
+test('collectMethods aggregates unique method counts and filterAndSortRecipes filters by method', () => {
+  const recipes = [
+    normalizeRecipe({
+      id: 'r1',
+      title: 'Chicken Chili',
+      methods: [
+        { name: 'Instant Pot', cookMinutes: 30, steps: ['Cook.'] },
+        { name: 'Slow Cooker', cookMinutes: 360, steps: ['Simmer.'] },
+      ],
+    }),
+    normalizeRecipe({
+      id: 'r2',
+      title: 'Pork Carnitas',
+      methods: [{ name: 'Slow Cooker', cookMinutes: 480, steps: ['Cook.'] }],
+    }),
+    normalizeRecipe({
+      id: 'r3',
+      title: 'Deleted Stew',
+      deleted: true,
+      methods: [{ name: 'Instant Pot', cookMinutes: 25, steps: ['Cook.'] }],
+    }),
+  ];
+
+  assert.deepEqual(collectMethods(recipes), [
+    { method: 'Slow Cooker', count: 2 },
+    { method: 'Instant Pot', count: 1 },
+  ]);
+
+  assert.deepEqual(
+    filterAndSortRecipes(recipes, { method: 'instant pot' }).map((r) => r.id),
+    ['r1']
+  );
+  assert.deepEqual(
+    filterAndSortRecipes(recipes, { method: 'Slow Cooker' }).map((r) => r.id),
+    ['r1', 'r2']
+  );
 });

@@ -13,7 +13,7 @@ import {
   softDeleteRecipe,
   toggleFavorite,
 } from './db/database.js';
-import { normalizeDivider, normalizeRecipe, parseTagsInput } from './lib/collection.js';
+import { getRecipeMethods, normalizeDivider, normalizeRecipe, parseTagsInput } from './lib/collection.js';
 import { recipeToFilename, recipeToMarkdown, slugifyFilename } from './lib/markdown.js';
 import { parseImportedContent, parseTextRecipe } from './lib/recipeImport.js';
 import { fetchAndScrapeRecipeUrl } from './lib/webScraper.js';
@@ -88,6 +88,7 @@ const state = {
   draftRecipe: null,
   activeDividerId: 'all',
   favoritesOnly: false,
+  activeMethod: '',
   activeTag: '',
   searchQuery: '',
   sortBy: 'updated',
@@ -293,6 +294,7 @@ function renderMainContent() {
     dividers: state.dividers,
     activeDividerId: state.activeDividerId,
     favoritesOnly: state.favoritesOnly,
+    activeMethod: state.activeMethod,
     activeTag: state.activeTag,
     searchQuery: state.searchQuery,
     sortBy: state.sortBy,
@@ -444,6 +446,14 @@ async function handleAction(action, target) {
     return;
   }
 
+  if (action === 'select-method-filter') {
+    const nextMethod = target.dataset.method || '';
+    state.activeMethod =
+      state.activeMethod.toLowerCase() === nextMethod.toLowerCase() ? '' : nextMethod;
+    render();
+    return;
+  }
+
   if (action === 'select-tag') {
     const nextTag = target.dataset.tag || '';
     state.activeTag = state.activeTag === nextTag ? '' : nextTag;
@@ -453,6 +463,7 @@ async function handleAction(action, target) {
 
   if (action === 'jump-tag') {
     resetCookSession(true);
+    state.activeMethod = '';
     state.activeTag = target.dataset.tag || '';
     state.activeDividerId = 'all';
     state.favoritesOnly = false;
@@ -464,6 +475,7 @@ async function handleAction(action, target) {
   if (action === 'clear-filters') {
     state.activeDividerId = 'all';
     state.favoritesOnly = false;
+    state.activeMethod = '';
     state.activeTag = '';
     state.searchQuery = '';
     render();
@@ -474,6 +486,18 @@ async function handleAction(action, target) {
     resetCookSession(true);
     state.draftRecipe = null;
     state.selectedRecipeId = target.dataset.recipeId || null;
+    if (state.activeMethod && state.selectedRecipeId) {
+      const opened = state.recipes.find((r) => r.id === state.selectedRecipeId);
+      if (opened) {
+        const targetMethod = state.activeMethod.toLowerCase();
+        const idx = getRecipeMethods(opened).findIndex(
+          (m) => String(m.name || '').trim().toLowerCase() === targetMethod
+        );
+        if (idx >= 0) {
+          state.activeMethodIndex = idx;
+        }
+      }
+    }
     state.view = 'detail';
     render();
     return;

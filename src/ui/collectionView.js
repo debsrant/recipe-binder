@@ -1,4 +1,9 @@
-import { collectTags, filterAndSortRecipes, getRecipeMethods } from '../lib/collection.js';
+import {
+  collectMethods,
+  collectTags,
+  filterAndSortRecipes,
+  getRecipeMethods,
+} from '../lib/collection.js';
 import { escapeHtml, formatMinutes } from './helpers.js';
 
 function formatRangeMinutes(minVal, maxVal) {
@@ -11,6 +16,7 @@ export function renderCollectionView({
   dividers,
   activeDividerId,
   favoritesOnly,
+  activeMethod = '',
   activeTag,
   searchQuery,
   sortBy,
@@ -29,11 +35,13 @@ export function renderCollectionView({
   const visibleRecipes = filterAndSortRecipes(activeRecipes, {
     dividerId: activeDividerId,
     favoritesOnly,
+    method: activeMethod,
     tag: activeTag,
     query: searchQuery,
     sortBy,
   });
 
+  const allMethods = collectMethods(activeRecipes);
   const allTags = collectTags(activeRecipes);
 
   const dividerTabsHtml = [
@@ -58,6 +66,27 @@ export function renderCollectionView({
       </button>`;
     }),
   ].join('');
+
+  const activeMethodLower = String(activeMethod || '').trim().toLowerCase();
+  const methodStripHtml =
+    allMethods.length > 0
+      ? `<div class="tag-filter-bar method-filter-bar" aria-label="Filter by cooking method">
+          <span class="tag-filter-label">Methods:</span>
+          <button type="button" class="tag-pill method-pill ${!activeMethodLower ? 'is-active' : ''}" data-action="select-method-filter" data-method="">
+            All
+          </button>
+          ${allMethods
+            .map(
+              ({ method, count }) =>
+                `<button type="button" class="tag-pill method-pill ${
+                  activeMethodLower === method.toLowerCase() ? 'is-active' : ''
+                }" data-action="select-method-filter" data-method="${escapeHtml(method)}">${escapeHtml(
+                  method
+                )} (${count})</button>`
+            )
+            .join('')}
+        </div>`
+      : '';
 
   const tagStripHtml =
     allTags.length > 0
@@ -166,14 +195,14 @@ export function renderCollectionView({
           <h2>No matching recipe cards</h2>
           <p class="muted">
             ${
-              searchQuery || activeTag || favoritesOnly || activeDividerId !== 'all'
-                ? 'Clear your active search or divider filter, or add a new recipe card to this section.'
+              searchQuery || activeTag || activeMethod || favoritesOnly || activeDividerId !== 'all'
+                ? 'Clear your active search, method, tag, or divider filter, or add a new recipe card to this section.'
                 : 'Your binder is empty. Create your first recipe card to begin.'
             }
           </p>
           <div class="btn-row">
             ${
-              searchQuery || activeTag || favoritesOnly || activeDividerId !== 'all'
+              searchQuery || activeTag || activeMethod || favoritesOnly || activeDividerId !== 'all'
                 ? '<button type="button" class="btn btn-secondary" data-action="clear-filters">Clear Filters</button>'
                 : ''
             }
@@ -219,6 +248,7 @@ export function renderCollectionView({
             <button type="button" class="btn btn-primary" data-action="new-recipe">+ New Recipe</button>
           </div>
         </div>
+        ${methodStripHtml}
         ${tagStripHtml}
       </div>
 
