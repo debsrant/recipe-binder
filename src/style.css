@@ -1873,12 +1873,6 @@ textarea {
   .flavor-layout {
     grid-template-columns: 1fr;
   }
-
-  .mealprep-split-grid,
-  .timeline-layout,
-  .mealprep-kpi-strip {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* Recipe serving size & Phase 5 Batch Cooking & Meal Prep Engine */
@@ -2278,6 +2272,18 @@ textarea {
   color: var(--text-muted);
   font-size: 0.82rem;
   margin-left: 0.35rem;
+}
+
+@media (max-width: 900px) {
+  .mealprep-split-grid,
+  .timeline-layout,
+  .mealprep-kpi-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .mealprep-form-col {
+    position: static;
+  }
 }
 
 /* Print Recipe Sheet */

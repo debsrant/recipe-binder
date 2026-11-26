@@ -1015,6 +1015,9 @@ test('mealPrep freezer status, portions, CRUD, and snapshot merge work offline &
   const expiredFreezer = { ...freshFreezer, bestByDate: '2026-11-20' };
   assert.equal(getFreezerItemStatus(expiredFreezer, '2026-11-26').status, 'expired');
 
+  assert.equal(normalizeFreezerItem({ title: 'Soup', portions: '' }).portions, 1);
+  assert.equal(normalizeFreezerItem({ title: 'Soup', portions: 0 }).portions, 0);
+
   const decremented = adjustFreezerPortions(freshFreezer, -4);
   assert.equal(decremented.portions, 0);
   assert.equal(getFreezerItemStatus(decremented, '2026-11-26').status, 'empty');

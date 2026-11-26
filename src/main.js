@@ -258,7 +258,7 @@ function renderTopbar() {
         <div class="brand-block">
           <h1 class="brand-title">${escapeHtml(APP_TITLE)}</h1>
           <span class="status-pill ${IS_TEST_STAGE ? 'is-test' : 'is-live'}">${escapeHtml(SITE_STAGE)}</span>
-          <span class="status-pill ${syncClass}">${escapeHtml(syncLabel)}</span>
+          <span id="topbar-sync-pill" class="status-pill ${syncClass}">${escapeHtml(syncLabel)}</span>
         </div>
 
         <div class="topbar-controls">
@@ -272,6 +272,15 @@ function renderTopbar() {
       </div>
     </header>
   `;
+}
+
+function updateSyncPillDom() {
+  const pill = document.getElementById('topbar-sync-pill');
+  if (!pill) return;
+  const syncLabel = getSyncPillLabel(state.syncSnapshot);
+  const syncClass = getSyncPillClass(state.syncSnapshot);
+  pill.className = `status-pill ${syncClass}`.trim();
+  pill.textContent = syncLabel;
 }
 
 function renderNavBar() {
@@ -467,11 +476,13 @@ async function persistReferencePatch(patch, noticeMsg) {
     ...patch,
   });
   state.referenceData = saved;
-  await pushReferenceDataToCloud(saved);
   if (noticeMsg) {
     setNotice('positive', noticeMsg);
   }
   render();
+  pushReferenceDataToCloud(saved).catch((err) => {
+    console.error('Reference cloud sync failed:', err);
+  });
 }
 
 async function persistMealPrepPatch(patch, noticeMsg) {
@@ -480,11 +491,13 @@ async function persistMealPrepPatch(patch, noticeMsg) {
     ...patch,
   });
   state.mealPrepData = saved;
-  await pushMealPrepDataToCloud(saved);
   if (noticeMsg) {
     setNotice('positive', noticeMsg);
   }
   render();
+  pushMealPrepDataToCloud(saved).catch((err) => {
+    console.error('Meal prep cloud sync failed:', err);
+  });
 }
 
 function resetCookSession(releaseLock = true) {
@@ -1937,73 +1950,95 @@ document.addEventListener('submit', async (event) => {
 
   if (form.id === 'mealprep-freezer-form') {
     event.preventDefault();
-    const fd = new FormData(form);
-    const existingId = String(fd.get('id') || '').trim();
-    const candidate = normalizeFreezerItem({
-      id: existingId || generateId('frz'),
-      recipeId: fd.get('recipeId'),
-      title: fd.get('title'),
-      storageLocation: fd.get('storageLocation'),
-      portions: fd.get('portions'),
-      servingSize: fd.get('servingSize'),
-      storedDate: fd.get('storedDate'),
-      bestByDate: fd.get('bestByDate'),
-      reheatNotes: fd.get('reheatNotes'),
-    });
-    const nextItems = upsertMealPrepItem(
-      state.mealPrepData.freezerItems || [],
-      candidate,
-      normalizeFreezerItem
-    );
-    state.editingFreezerId = null;
-    state.prefillFreezer = null;
-    await persistMealPrepPatch(
-      { freezerItems: nextItems },
-      `Saved "${candidate.title}" (${candidate.portions} portions) to inventory.`
-    );
+    try {
+      const fd = new FormData(form);
+      const existingId = String(fd.get('id') || '').trim();
+      const title = String(fd.get('title') || '').trim();
+      if (!title) {
+        setNotice('warning', 'Please enter a dish name before saving to inventory.');
+        render();
+        return;
+      }
+      const candidate = normalizeFreezerItem({
+        id: existingId || generateId('frz'),
+        recipeId: fd.get('recipeId'),
+        title,
+        storageLocation: fd.get('storageLocation'),
+        portions: fd.get('portions'),
+        servingSize: fd.get('servingSize'),
+        storedDate: fd.get('storedDate'),
+        bestByDate: fd.get('bestByDate'),
+        reheatNotes: fd.get('reheatNotes'),
+      });
+      const nextItems = upsertMealPrepItem(
+        state.mealPrepData.freezerItems || [],
+        candidate,
+        normalizeFreezerItem
+      );
+      if (!existingId) {
+        state.freezerFilter = 'all';
+        state.freezerQuery = '';
+      }
+      state.editingFreezerId = null;
+      state.prefillFreezer = null;
+      await persistMealPrepPatch(
+        { freezerItems: nextItems },
+        `Saved "${candidate.title}" (${candidate.portions} portions) to inventory.`
+      );
+    } catch (err) {
+      console.error('Freezer form save failed:', err);
+      setNotice('danger', err?.message || 'Could not save freezer entry.');
+      render();
+    }
     return;
   }
 
   if (form.id === 'mealprep-template-form') {
     event.preventDefault();
-    const fd = new FormData(form);
-    const existingId = String(fd.get('id') || '').trim();
-    const derivatives = String(fd.get('derivativesText') || '')
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line, idx) => {
-        const [dayRaw, titleRaw, notesRaw, recipeIdRaw] = line.split('|').map((s) => s.trim());
-        const numericDay = Number(dayRaw);
-        const hasExplicitDay = Number.isFinite(numericDay);
-        return normalizeDerivative({
-          id: `deriv-${idx + 1}-${Date.now().toString(36)}`,
-          dayOffset: hasExplicitDay ? numericDay : idx,
-          title: hasExplicitDay ? titleRaw || dayRaw : dayRaw,
-          notes: hasExplicitDay ? notesRaw : titleRaw,
-          recipeId: hasExplicitDay ? recipeIdRaw : notesRaw,
+    try {
+      const fd = new FormData(form);
+      const existingId = String(fd.get('id') || '').trim();
+      const derivatives = String(fd.get('derivativesText') || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line, idx) => {
+          const [dayRaw, titleRaw, notesRaw, recipeIdRaw] = line.split('|').map((s) => s.trim());
+          const numericDay = Number(dayRaw);
+          const hasExplicitDay = Number.isFinite(numericDay);
+          return normalizeDerivative({
+            id: `deriv-${idx + 1}-${Date.now().toString(36)}`,
+            dayOffset: hasExplicitDay ? numericDay : idx,
+            title: hasExplicitDay ? titleRaw || dayRaw : dayRaw,
+            notes: hasExplicitDay ? notesRaw : titleRaw,
+            recipeId: hasExplicitDay ? recipeIdRaw : notesRaw,
+          });
         });
-      });
 
-    const candidate = normalizeBatchTemplate({
-      id: existingId || generateId('batch'),
-      title: fd.get('title'),
-      baseRecipeId: fd.get('baseRecipeId'),
-      baseLabel: fd.get('baseLabel'),
-      batchYield: fd.get('batchYield'),
-      prepTips: fd.get('prepTips'),
-      derivatives,
-    });
-    const nextTemplates = upsertMealPrepItem(
-      state.mealPrepData.templates || [],
-      candidate,
-      normalizeBatchTemplate
-    );
-    state.editingTemplateId = null;
-    await persistMealPrepPatch(
-      { templates: nextTemplates },
-      `Saved batch prep plan "${candidate.title}".`
-    );
+      const candidate = normalizeBatchTemplate({
+        id: existingId || generateId('batch'),
+        title: fd.get('title'),
+        baseRecipeId: fd.get('baseRecipeId'),
+        baseLabel: fd.get('baseLabel'),
+        batchYield: fd.get('batchYield'),
+        prepTips: fd.get('prepTips'),
+        derivatives,
+      });
+      const nextTemplates = upsertMealPrepItem(
+        state.mealPrepData.templates || [],
+        candidate,
+        normalizeBatchTemplate
+      );
+      state.editingTemplateId = null;
+      await persistMealPrepPatch(
+        { templates: nextTemplates },
+        `Saved batch prep plan "${candidate.title}".`
+      );
+    } catch (err) {
+      console.error('Template form save failed:', err);
+      setNotice('danger', err?.message || 'Could not save batch prep plan.');
+      render();
+    }
     return;
   }
 
@@ -2085,7 +2120,11 @@ async function bootstrap() {
     },
     onStatusChange: (snap) => {
       state.syncSnapshot = snap;
-      render();
+      if (state.view === 'sync') {
+        render();
+      } else {
+        updateSyncPillDom();
+      }
     },
   });
 }

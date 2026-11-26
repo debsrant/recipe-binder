@@ -73,7 +73,9 @@ export function normalizeFreezerItem(item) {
   const rawLocation = cleanText(item?.storageLocation, 'freezer').toLowerCase();
   const storageLocation = STORAGE_LOCATION_SET.has(rawLocation) ? rawLocation : 'freezer';
   const defaultBestBy = addDaysIso(storedDate, storageLocation === 'fridge' ? 4 : 90);
-  const rawPortions = Number(item?.portions);
+  const hasPortions =
+    item?.portions !== '' && item?.portions !== null && item?.portions !== undefined;
+  const rawPortions = hasPortions ? Number(item.portions) : NaN;
   const portions = Number.isFinite(rawPortions) && rawPortions >= 0 ? Number(rawPortions) : 1;
   const updatedNum = Number(item?.updatedMs);
 
