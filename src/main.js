@@ -13,7 +13,13 @@ import {
   softDeleteRecipe,
   toggleFavorite,
 } from './db/database.js';
-import { getRecipeMethods, normalizeDivider, normalizeRecipe, parseTagsInput } from './lib/collection.js';
+import {
+  getRecipeMethods,
+  mergeCollectionSnapshots,
+  normalizeDivider,
+  normalizeRecipe,
+  parseTagsInput,
+} from './lib/collection.js';
 import { recipeToFilename, recipeToMarkdown, slugifyFilename } from './lib/markdown.js';
 import { parseImportedContent, parseTextRecipe } from './lib/recipeImport.js';
 import { fetchAndScrapeRecipeUrl } from './lib/webScraper.js';
@@ -919,7 +925,6 @@ async function importBackupSnapshot(parsed, mode = 'merge') {
   }
 
   const local = await getSnapshot();
-  const { mergeCollectionSnapshots } = await import('./lib/collection.js');
   const merged = mergeCollectionSnapshots(local, parsed);
   const snap = await applyMergedSnapshot(merged);
   applySnapshotToState(snap);

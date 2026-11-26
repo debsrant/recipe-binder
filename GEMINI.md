@@ -38,7 +38,7 @@ When asked to update `GEMINI.md` or sync project progress:
 
 ### 4. Tech Stack & Attached Services
 * **Frontend / Core:** `Vanilla ES6 JavaScript, HTML5, CSS3 (flat-utilitarian-warm-parchment theme variants: Parchment, Slate, Dusk), Vite, VitePWA`
-* **Local Storage / DB:** `IndexedDB via Dexie.js (RecipeBinderDB_Test in TEST / RecipeBinderDB in LIVE) + localStorage preferences (recipe-binder:theme, recipe-binder:fontScale)`
+* **Local Storage / DB:** `IndexedDB via Dexie.js (RecipeBinderDB_Test in TEST / RecipeBinderDB in LIVE) + localStorage preferences (recipe-binder:theme, recipe-binder:fontScale, recipe-binder:detailLayout, recipe-binder:printMethodsMode)`
 * **Cloud / External Services:** `Optional Firebase Auth (Google + Email/Password) & Cloud Firestore (users/{uid}/recipeBinder/state_{test|live}/recipes) with offline persistence; GitHub Pages deployment via .github/workflows/deploy-pages.yml`
 * **AI / LLM Endpoints:** `None (100% Offline-Capable)`
 
@@ -62,6 +62,7 @@ When asked to update `GEMINI.md` or sync project progress:
 * `2026-11-26`: Initialized project scaffold, multi-root workspace, Dexie IndexedDB + VitePWA offline shell, Phase 1 Recipe Cards & Dividers UI, pure-JS scaling/collection modules with `node --test` suite, and optional Firebase Firestore cross-device sync.
 * `2026-11-26`: Added Classic Sheet view & traditional `@media print` cookbook typography, single `.md` export/import + zero-dependency `.zip` bulk Markdown export, local Vite `/api/fetch-recipe` proxy + JSON-LD/Microdata URL scraper, and drag-and-drop file + copy-paste text recipe conversion.
 * `2026-11-26`: Added per-recipe multi-method cooking tabs (`methods[]`) with single-method instruction labels, Print Selected / Print All toggle, multi-method Markdown/HTML/text import parsing, and auto-dismissing alert banners.
+* `2026-11-26`: Added Collection `Methods:` filter bar above `Tags:` (auto-selecting the filtered method tab on open), untracked `zed/` via `.gitignore`, enabled public GitHub Pages deployment, and aligned `README.md`, CI env vars, and `dev-hub` docs.
 
 ### 7. Dev-Hub Runbook Integration
 * **Extracting Runbooks (`../dev-hub/runbooks/<topic>.md`):** When asked to *"turn this into a runbook"*, extract reusable, step-by-step terminal commands and configuration checklists, replacing project-specific names with `<placeholders>`.

@@ -1,6 +1,6 @@
 # Recipe Binder — Product Roadmap
 
-Grounded in `zed/recipe-binder/recipe-binder-roadmap.md` ("The Modern Digital Kitchen Binder"): tactile, distraction-free, offline-first, and designed for active cooking across desktop, phone, and kitchen tablet.
+Grounded in `zed/recipe-binder-roadmap.md` ("The Modern Digital Kitchen Binder"): tactile, distraction-free, offline-first, and designed for active cooking across desktop, phone, and kitchen tablet.
 
 ---
 
