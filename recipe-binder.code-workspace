@@ -1,0 +1,35 @@
+{
+  "folders": [
+    {
+      "name": "Recipe Binder",
+      "path": "."
+    },
+    {
+      "name": "Dev Hub (Docs & Runbooks)",
+      "path": "../dev-hub"
+    }
+  ],
+  "settings": {
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2,
+    "files.autoSave": "onFocusChange",
+    "files.exclude": {
+      "**/.git": true,
+      "**/node_modules": true,
+      "**/dist": true,
+      "**/build": true
+    },
+    "search.exclude": {
+      "**/node_modules": true,
+      "**/dist": true,
+      "**/package-lock.json": true
+    },
+    "terminal.integrated.cwd": "${workspaceFolder:Recipe Binder}"
+  },
+  "extensions": {
+    "recommendations": [
+      "yzhang.markdown-all-in-one",
+      "continue.continue"
+    ]
+  }
+}

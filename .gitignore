@@ -1,0 +1,16 @@
+# Dependencies & Builds
+node_modules/
+dist/
+build/
+
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+
+# OS & Editor Files
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
