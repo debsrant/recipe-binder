@@ -9,6 +9,7 @@ import {
   replaceAllData,
   resetToSeedData,
   saveDividers,
+  saveMealPrepData,
   saveRecipe,
   saveReferenceData,
   softDeleteRecipe,
@@ -22,6 +23,15 @@ import {
   parseTagsInput,
 } from './lib/collection.js';
 import { recipeToFilename, recipeToMarkdown, slugifyFilename } from './lib/markdown.js';
+import {
+  adjustFreezerPortions,
+  deleteMealPrepItem,
+  getDefaultMealPrepData,
+  normalizeBatchTemplate,
+  normalizeDerivative,
+  normalizeFreezerItem,
+  upsertMealPrepItem,
+} from './lib/mealPrep.js';
 import { parseImportedContent, parseTextRecipe } from './lib/recipeImport.js';
 import {
   deleteFlavorItem,
@@ -39,6 +49,7 @@ import {
   getSyncSnapshot,
   initCloudSync,
   pushDividersToCloud,
+  pushMealPrepDataToCloud,
   pushRecipeToCloud,
   pushReferenceDataToCloud,
   signInWithEmail,
@@ -59,6 +70,7 @@ import {
   generateId,
 } from './ui/helpers.js';
 import { renderImportView } from './ui/importView.js';
+import { renderMealPrepView } from './ui/mealPrepView.js';
 import {
   renderConverterResultHtml,
   renderReferenceView,
@@ -114,6 +126,7 @@ const state = {
   dividers: [],
   dividersUpdatedMs: 0,
   referenceData: getDefaultReferenceData(),
+  mealPrepData: getDefaultMealPrepData(),
   selectedRecipeId: null,
   editingRecipeId: null,
   draftRecipe: null,
@@ -127,6 +140,14 @@ const state = {
   activeMethodIndex: 0,
   activeTechniqueId: null,
   referenceTab: 'converter',
+  mealPrepTab: 'freezer',
+  freezerFilter: 'all',
+  freezerQuery: '',
+  editingFreezerId: null,
+  prefillFreezer: null,
+  editingTemplateId: null,
+  timelineSelections: {},
+  checkedTimelineSteps: new Set(),
   converter: {
     mode: 'volume-weight',
     value: '1',
@@ -260,6 +281,7 @@ function renderNavBar() {
       <div class="nav-tab-list">
         <button type="button" class="nav-tab ${collectionActive ? 'is-active' : ''}" data-action="nav-view" data-view="collection">Collection</button>
         <button type="button" class="nav-tab ${state.view === 'import' ? 'is-active' : ''}" data-action="nav-view" data-view="import">Import</button>
+        <button type="button" class="nav-tab ${state.view === 'mealprep' ? 'is-active' : ''}" data-action="nav-view" data-view="mealprep">Meal Prep</button>
         <button type="button" class="nav-tab ${state.view === 'reference' ? 'is-active' : ''}" data-action="nav-view" data-view="reference">Reference</button>
         <button type="button" class="nav-tab ${state.view === 'dividers' ? 'is-active' : ''}" data-action="nav-view" data-view="dividers">Dividers</button>
         <button type="button" class="nav-tab ${state.view === 'sync' ? 'is-active' : ''}" data-action="nav-view" data-view="sync">Sync & Backup</button>
@@ -326,6 +348,21 @@ function renderMainContent() {
     });
   }
 
+  if (state.view === 'mealprep') {
+    return renderMealPrepView({
+      activeTab: state.mealPrepTab,
+      mealPrepData: state.mealPrepData,
+      recipes: state.recipes,
+      freezerFilter: state.freezerFilter,
+      freezerQuery: state.freezerQuery,
+      editingFreezerId: state.editingFreezerId,
+      prefillFreezer: state.prefillFreezer,
+      editingTemplateId: state.editingTemplateId,
+      timelineSelections: state.timelineSelections,
+      checkedTimelineSteps: state.checkedTimelineSteps,
+    });
+  }
+
   if (state.view === 'reference') {
     return renderReferenceView({
       activeTab: state.referenceTab,
@@ -373,6 +410,7 @@ function renderMainContent() {
 
 const PRESERVED_SEARCH_IDS = new Set([
   'recipe-search-input',
+  'mealprep-freezer-search',
   'reference-sub-search',
   'reference-chart-search',
   'reference-technique-search',
@@ -414,6 +452,7 @@ function applySnapshotToState(snapshot) {
   state.dividers = snapshot.dividers || [];
   state.dividersUpdatedMs = Number(snapshot.dividersUpdatedMs || 0);
   state.referenceData = snapshot.referenceData || getDefaultReferenceData();
+  state.mealPrepData = snapshot.mealPrepData || getDefaultMealPrepData();
   if (
     state.activeDividerId !== 'all' &&
     !state.dividers.some((d) => d.id === state.activeDividerId)
@@ -429,6 +468,19 @@ async function persistReferencePatch(patch, noticeMsg) {
   });
   state.referenceData = saved;
   await pushReferenceDataToCloud(saved);
+  if (noticeMsg) {
+    setNotice('positive', noticeMsg);
+  }
+  render();
+}
+
+async function persistMealPrepPatch(patch, noticeMsg) {
+  const saved = await saveMealPrepData({
+    ...state.mealPrepData,
+    ...patch,
+  });
+  state.mealPrepData = saved;
+  await pushMealPrepDataToCloud(saved);
   if (noticeMsg) {
     setNotice('positive', noticeMsg);
   }
@@ -475,6 +527,7 @@ function readEditorFormIntoDraft() {
     prepMinutes: Number(fd.get('prepMinutes') || 0),
     cookMinutes: methods[0]?.cookMinutes ?? 0,
     servings: Number(fd.get('servings') || 4),
+    servingSize: String(fd.get('servingSize') || '').trim(),
     tags: parseTagsInput(fd.get('tags')),
     ingredients: String(fd.get('ingredients') || '')
       .split(/\r?\n/)
@@ -899,6 +952,167 @@ async function handleAction(action, target) {
     return;
   }
 
+  if (action === 'set-mealprep-tab') {
+    state.mealPrepTab = target.dataset.tab || 'freezer';
+    render();
+    return;
+  }
+
+  if (action === 'set-freezer-filter') {
+    state.freezerFilter = target.dataset.filter || 'all';
+    render();
+    return;
+  }
+
+  if (action === 'adjust-freezer-portions') {
+    const id = target.dataset.itemId;
+    const delta = Number(target.dataset.delta || 0);
+    const items = state.mealPrepData.freezerItems || [];
+    const idx = items.findIndex((i) => i.id === id);
+    if (idx < 0) return;
+    const updated = adjustFreezerPortions(items[idx], delta);
+    const nextItems = [...items];
+    nextItems[idx] = updated;
+    await persistMealPrepPatch(
+      { freezerItems: nextItems },
+      updated.portions === 0 ? `Marked "${updated.title}" empty (0 portions left).` : ''
+    );
+    return;
+  }
+
+  if (action === 'edit-freezer-item') {
+    state.editingFreezerId = target.dataset.itemId || null;
+    state.prefillFreezer = null;
+    state.mealPrepTab = 'freezer';
+    render();
+    return;
+  }
+
+  if (action === 'cancel-freezer-edit') {
+    state.editingFreezerId = null;
+    state.prefillFreezer = null;
+    render();
+    return;
+  }
+
+  if (action === 'delete-freezer-item') {
+    const id = target.dataset.itemId;
+    const item = (state.mealPrepData.freezerItems || []).find((i) => i.id === id);
+    if (!item || !window.confirm(`Remove "${item.title}" from freezer/leftover inventory?`)) return;
+    const nextItems = deleteMealPrepItem(state.mealPrepData.freezerItems || [], id);
+    if (state.editingFreezerId === id) {
+      state.editingFreezerId = null;
+    }
+    await persistMealPrepPatch({ freezerItems: nextItems }, `Removed "${item.title}".`);
+    return;
+  }
+
+  if (action === 'send-recipe-to-freezer') {
+    const id = target.dataset.recipeId || state.selectedRecipeId;
+    const recipe = state.recipes.find((r) => r.id === id && !r.deleted);
+    if (!recipe) return;
+    if (state.view === 'detail') {
+      resetCookSession(true);
+    }
+    const scaleRaw = Number(target.dataset.scale || state.scaleFactor || 1);
+    const scale = Number.isFinite(scaleRaw) && scaleRaw > 0 ? scaleRaw : 1;
+    const portions = Math.max(0.5, Math.round((Number(recipe.servings) || 4) * scale * 10) / 10);
+    const today = new Date().toISOString().slice(0, 10);
+    const bestBy = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
+    state.editingFreezerId = null;
+    state.prefillFreezer = {
+      recipeId: recipe.id,
+      title: recipe.title,
+      storageLocation: 'freezer',
+      portions,
+      servingSize: recipe.servingSize || '1 serving',
+      storedDate: today,
+      bestByDate: bestBy,
+      reheatNotes: '',
+    };
+    state.view = 'mealprep';
+    state.mealPrepTab = 'freezer';
+    setNotice('positive', `Pre-filled freezer log for "${recipe.title}". Confirm portions & save.`);
+    render();
+    return;
+  }
+
+  if (action === 'clear-timeline-selection') {
+    state.timelineSelections = {};
+    state.checkedTimelineSteps = new Set();
+    render();
+    return;
+  }
+
+  if (action === 'print-mealprep-plan') {
+    window.print();
+    return;
+  }
+
+  if (action === 'toggle-timeline-step') {
+    const stepId = target.dataset.stepId;
+    if (!stepId) return;
+    if (state.checkedTimelineSteps.has(stepId)) {
+      state.checkedTimelineSteps.delete(stepId);
+    } else {
+      state.checkedTimelineSteps.add(stepId);
+    }
+    render();
+    return;
+  }
+
+  if (action === 'load-template-timeline') {
+    const tplId = target.dataset.templateId;
+    const tpl = (state.mealPrepData.templates || []).find((t) => t.id === tplId && !t.deleted);
+    if (!tpl) return;
+    const nextSel = {};
+    const activeIds = new Set(state.recipes.filter((r) => !r.deleted).map((r) => r.id));
+    if (tpl.baseRecipeId && activeIds.has(tpl.baseRecipeId)) {
+      nextSel[tpl.baseRecipeId] = { selected: true, scale: 2, methodId: '' };
+    }
+    for (const deriv of tpl.derivatives || []) {
+      if (deriv.recipeId && activeIds.has(deriv.recipeId)) {
+        nextSel[deriv.recipeId] = { selected: true, scale: 1, methodId: '' };
+      }
+    }
+    state.timelineSelections = nextSel;
+    state.checkedTimelineSteps = new Set();
+    state.mealPrepTab = 'timeline';
+    setNotice(
+      'positive',
+      Object.keys(nextSel).length > 0
+        ? `Loaded "${tpl.title}" linked recipes into Merged Prep Timeline.`
+        : `"${tpl.title}" has no binder recipe links yet — pick recipes on the left.`
+    );
+    render();
+    return;
+  }
+
+  if (action === 'edit-batch-template') {
+    state.editingTemplateId = target.dataset.templateId || null;
+    state.mealPrepTab = 'templates';
+    render();
+    return;
+  }
+
+  if (action === 'cancel-template-edit') {
+    state.editingTemplateId = null;
+    render();
+    return;
+  }
+
+  if (action === 'delete-batch-template') {
+    const id = target.dataset.templateId;
+    const tpl = (state.mealPrepData.templates || []).find((t) => t.id === id);
+    if (!tpl || !window.confirm(`Delete batch plan "${tpl.title}"?`)) return;
+    const nextTemplates = deleteMealPrepItem(state.mealPrepData.templates || [], id);
+    if (state.editingTemplateId === id) {
+      state.editingTemplateId = null;
+    }
+    await persistMealPrepPatch({ templates: nextTemplates }, `Deleted "${tpl.title}".`);
+    return;
+  }
+
   if (action === 'add-editor-method') {
     const draft = readEditorFormIntoDraft();
     if (!draft) return;
@@ -1117,6 +1331,7 @@ async function handleAction(action, target) {
       dividersUpdatedMs: snapshot.dividersUpdatedMs,
       recipes: snapshot.recipes,
       referenceData: snapshot.referenceData,
+      mealPrepData: snapshot.mealPrepData,
     });
     setNotice('positive', 'Exported JSON backup.');
     render();
@@ -1297,7 +1512,10 @@ document.addEventListener('click', (event) => {
     action === 'sort-change' ||
     action === 'toggle-ingredient-check' ||
     action === 'toggle-step-check' ||
-    action === 'toggle-save-immediately'
+    action === 'toggle-save-immediately' ||
+    action === 'toggle-timeline-recipe' ||
+    action === 'set-timeline-scale' ||
+    action === 'set-timeline-method'
   ) {
     return;
   }
@@ -1322,10 +1540,12 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key === 'Enter' || event.key === ' ') {
-    const actionEl = event.target.closest?.('[data-action="select-flavor-family"]');
+    const actionEl = event.target.closest?.(
+      '[data-action="select-flavor-family"], [data-action="toggle-timeline-step"]'
+    );
     if (actionEl) {
       event.preventDefault();
-      handleAction('select-flavor-family', actionEl);
+      handleAction(actionEl.dataset.action, actionEl);
     }
   }
 });
@@ -1334,6 +1554,11 @@ document.addEventListener('input', (event) => {
   const target = event.target;
   if (target.dataset.action === 'search-input') {
     state.searchQuery = target.value;
+    render();
+    return;
+  }
+  if (target.id === 'mealprep-freezer-search') {
+    state.freezerQuery = target.value;
     render();
     return;
   }
@@ -1460,6 +1685,70 @@ document.addEventListener('change', async (event) => {
     } finally {
       target.value = '';
       render();
+    }
+    return;
+  }
+
+  if (target.dataset.action === 'toggle-timeline-recipe') {
+    const recipeId = target.dataset.recipeId;
+    if (!recipeId) return;
+    const prev = state.timelineSelections[recipeId] || { selected: false, scale: 1, methodId: '' };
+    state.timelineSelections = {
+      ...state.timelineSelections,
+      [recipeId]: { ...prev, selected: Boolean(target.checked) },
+    };
+    render();
+    return;
+  }
+
+  if (target.dataset.action === 'set-timeline-scale') {
+    const recipeId = target.dataset.recipeId;
+    const scale = Number(target.value || 1);
+    if (!recipeId || !Number.isFinite(scale) || scale <= 0) return;
+    const prev = state.timelineSelections[recipeId] || { selected: true, scale: 1, methodId: '' };
+    state.timelineSelections = {
+      ...state.timelineSelections,
+      [recipeId]: { ...prev, scale },
+    };
+    render();
+    return;
+  }
+
+  if (target.dataset.action === 'set-timeline-method') {
+    const recipeId = target.dataset.recipeId;
+    if (!recipeId) return;
+    const prev = state.timelineSelections[recipeId] || { selected: true, scale: 1, methodId: '' };
+    state.timelineSelections = {
+      ...state.timelineSelections,
+      [recipeId]: { ...prev, methodId: target.value || '' },
+    };
+    render();
+    return;
+  }
+
+  if (target.id === 'freezer-recipe-select') {
+    const recipe = state.recipes.find((r) => r.id === target.value && !r.deleted);
+    if (!recipe) return;
+    const form = target.closest('form');
+    if (!form) return;
+    const titleInput = form.querySelector('#freezer-title');
+    const portionsInput = form.querySelector('#freezer-portions');
+    const sizeInput = form.querySelector('#freezer-serving-size');
+    if (titleInput) titleInput.value = recipe.title;
+    if (portionsInput) portionsInput.value = String(recipe.servings || 4);
+    if (sizeInput) sizeInput.value = recipe.servingSize || '1 serving';
+    return;
+  }
+
+  if (target.id === 'freezer-location') {
+    const form = target.closest('form');
+    if (!form) return;
+    const storedInput = form.querySelector('#freezer-stored-date');
+    const bestByInput = form.querySelector('#freezer-bestby-date');
+    const baseMs = Date.parse(`${storedInput?.value || new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+    if (bestByInput && Number.isFinite(baseMs)) {
+      const days = target.value === 'fridge' ? 4 : 90;
+      bestByInput.value = new Date(baseMs + days * 86400000).toISOString().slice(0, 10);
     }
   }
 });
@@ -1627,6 +1916,78 @@ document.addEventListener('submit', async (event) => {
     state.editingFlavorId = null;
     state.selectedFlavorId = candidate.id;
     await persistReferencePatch({ flavors: nextFlavors }, `Saved "${candidate.name}" to Flavor Wheel.`);
+    return;
+  }
+
+  if (form.id === 'mealprep-freezer-form') {
+    event.preventDefault();
+    const fd = new FormData(form);
+    const existingId = String(fd.get('id') || '').trim();
+    const candidate = normalizeFreezerItem({
+      id: existingId || generateId('frz'),
+      recipeId: fd.get('recipeId'),
+      title: fd.get('title'),
+      storageLocation: fd.get('storageLocation'),
+      portions: fd.get('portions'),
+      servingSize: fd.get('servingSize'),
+      storedDate: fd.get('storedDate'),
+      bestByDate: fd.get('bestByDate'),
+      reheatNotes: fd.get('reheatNotes'),
+    });
+    const nextItems = upsertMealPrepItem(
+      state.mealPrepData.freezerItems || [],
+      candidate,
+      normalizeFreezerItem
+    );
+    state.editingFreezerId = null;
+    state.prefillFreezer = null;
+    await persistMealPrepPatch(
+      { freezerItems: nextItems },
+      `Saved "${candidate.title}" (${candidate.portions} portions) to inventory.`
+    );
+    return;
+  }
+
+  if (form.id === 'mealprep-template-form') {
+    event.preventDefault();
+    const fd = new FormData(form);
+    const existingId = String(fd.get('id') || '').trim();
+    const derivatives = String(fd.get('derivativesText') || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line, idx) => {
+        const [dayRaw, titleRaw, notesRaw, recipeIdRaw] = line.split('|').map((s) => s.trim());
+        const numericDay = Number(dayRaw);
+        const hasExplicitDay = Number.isFinite(numericDay);
+        return normalizeDerivative({
+          id: `deriv-${idx + 1}-${Date.now().toString(36)}`,
+          dayOffset: hasExplicitDay ? numericDay : idx,
+          title: hasExplicitDay ? titleRaw || dayRaw : dayRaw,
+          notes: hasExplicitDay ? notesRaw : titleRaw,
+          recipeId: hasExplicitDay ? recipeIdRaw : notesRaw,
+        });
+      });
+
+    const candidate = normalizeBatchTemplate({
+      id: existingId || generateId('batch'),
+      title: fd.get('title'),
+      baseRecipeId: fd.get('baseRecipeId'),
+      baseLabel: fd.get('baseLabel'),
+      batchYield: fd.get('batchYield'),
+      prepTips: fd.get('prepTips'),
+      derivatives,
+    });
+    const nextTemplates = upsertMealPrepItem(
+      state.mealPrepData.templates || [],
+      candidate,
+      normalizeBatchTemplate
+    );
+    state.editingTemplateId = null;
+    await persistMealPrepPatch(
+      { templates: nextTemplates },
+      `Saved batch prep plan "${candidate.title}".`
+    );
     return;
   }
 

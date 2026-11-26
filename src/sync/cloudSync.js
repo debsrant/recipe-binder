@@ -25,6 +25,7 @@ import {
 import { FIREBASE_CONFIG, FIRESTORE_STAGE_DOC, IS_FIREBASE_CONFIGURED } from '../config.js';
 import { mergeCollectionSnapshots, normalizeDivider, normalizeRecipe } from '../lib/collection.js';
 import { normalizeReferenceData } from '../lib/reference.js';
+import { normalizeMealPrepData } from '../lib/mealPrep.js';
 
 const CLIENT_ID =
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -128,6 +129,14 @@ async function writeReferenceDoc(uid, referenceData) {
   await setDoc(getStageDocRef(uid), payload, { merge: true });
 }
 
+async function writeMealPrepDoc(uid, mealPrepData) {
+  const payload = {
+    mealPrepData: normalizeMealPrepData(mealPrepData),
+    updatedBy: CLIENT_ID,
+  };
+  await setDoc(getStageDocRef(uid), payload, { merge: true });
+}
+
 async function writeRecipeDoc(uid, recipe, fallbackDividerId) {
   const payload = {
     ...normalizeRecipe(recipe, fallbackDividerId),
@@ -168,6 +177,7 @@ async function startUserSync(user) {
       dividers: remoteMeta?.dividers || [],
       dividersUpdatedMs: Number(remoteMeta?.dividersUpdatedMs || 0),
       referenceData: remoteMeta?.referenceData || null,
+      mealPrepData: remoteMeta?.mealPrepData || null,
       recipes: remoteRecipes,
     };
 
@@ -186,6 +196,23 @@ async function startUserSync(user) {
     const remoteRefMs = Number(remoteMeta?.referenceData?.updatedMs || 0);
     if (localRefMs > 0 && (!remoteMeta?.referenceData || localRefMs > remoteRefMs)) {
       pendingWrites.push(writeReferenceDoc(user.uid, merged.referenceData));
+    }
+
+    const maxUpdated = (arr) =>
+      Array.isArray(arr) ? arr.reduce((m, x) => Math.max(m, Number(x?.updatedMs || 0)), 0) : 0;
+    const localMpMs = Math.max(
+      maxUpdated(merged.mealPrepData?.templates),
+      maxUpdated(merged.mealPrepData?.freezerItems)
+    );
+    const remoteMpMs = Math.max(
+      maxUpdated(remoteMeta?.mealPrepData?.templates),
+      maxUpdated(remoteMeta?.mealPrepData?.freezerItems)
+    );
+    if (
+      merged.mealPrepData &&
+      (!remoteMeta?.mealPrepData || localMpMs > remoteMpMs)
+    ) {
+      pendingWrites.push(writeMealPrepDoc(user.uid, merged.mealPrepData));
     }
 
     for (const recipe of merged.recipes) {
@@ -233,6 +260,7 @@ async function startUserSync(user) {
         dividers: data?.dividers || [],
         dividersUpdatedMs: Number(data?.dividersUpdatedMs || 0),
         referenceData: data?.referenceData || null,
+        mealPrepData: data?.mealPrepData || null,
         recipes: [],
       });
       await callbacks.onMergedSnapshot(merged);
@@ -399,6 +427,24 @@ export async function pushReferenceDataToCloud(referenceData) {
   }
 }
 
+export async function pushMealPrepDataToCloud(mealPrepData) {
+  if (!IS_FIREBASE_CONFIGURED || !auth?.currentUser || !db) return;
+  emitStatus({ status: navigator.onLine ? 'syncing' : 'offline' });
+  try {
+    await writeMealPrepDoc(auth.currentUser.uid, mealPrepData);
+    emitStatus({
+      status: navigator.onLine ? 'synced' : 'offline',
+      lastSyncedAt: nowTimeLabel(),
+      error: '',
+    });
+  } catch (err) {
+    emitStatus({
+      status: navigator.onLine ? 'error' : 'offline',
+      error: formatAuthError(err),
+    });
+  }
+}
+
 export async function forceSyncAllToCloud(snapshot) {
   if (!IS_FIREBASE_CONFIGURED || !auth?.currentUser || !db) return;
   emitStatus({ status: navigator.onLine ? 'syncing' : 'offline', error: '' });
@@ -408,6 +454,9 @@ export async function forceSyncAllToCloud(snapshot) {
     await writeDividersDoc(uid, snapshot?.dividers || [], snapshot?.dividersUpdatedMs || Date.now());
     if (snapshot?.referenceData) {
       await writeReferenceDoc(uid, snapshot.referenceData);
+    }
+    if (snapshot?.mealPrepData) {
+      await writeMealPrepDoc(uid, snapshot.mealPrepData);
     }
     await Promise.all((snapshot?.recipes || []).map((r) => writeRecipeDoc(uid, r, fallbackId)));
     emitStatus({

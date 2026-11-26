@@ -65,6 +65,7 @@ When asked to update `GEMINI.md` or sync project progress:
 * `2026-11-26`: Added Collection `Methods:` filter bar above `Tags:` (auto-selecting the filtered method tab on open), untracked `zed/` via `.gitignore`, enabled public GitHub Pages deployment, and aligned `README.md`, CI env vars, and `dev-hub` docs.
 * `2026-11-26`: Implemented Phase 4 Front Pocket Reference Guide (meat temps, grain ratios, oil smoke points, substitutions, 12 technique cards with in-recipe keyword pop-ups, and interactive SVG flavor pairing wheel) plus standalone & in-recipe Volume <-> Weight unit converter.
 * `2026-11-26`: Added dedicated Substitutions tab (including Spices & Herbs) and full IndexedDB + Firebase cloud sync CRUD (add/edit/delete/reset) for Substitutions, Technique Cards, and Flavor Wheel entries.
+* `2026-11-26`: Implemented Phase 5 Batch Cooking & Meal Prep Engine (`src/lib/mealPrep.js`, `src/ui/mealPrepView.js`) with Freezer & Leftover Inventory ("Send to Freezer"), Merged Prep Timelines, "Cook Once, Eat Thrice" templates with IndexedDB/Firebase sync, and added `servingSize` yield labels across recipe cards, editor, detail view, and Markdown export/import.
 
 ### 7. Dev-Hub Runbook Integration
 * **Extracting Runbooks (`../dev-hub/runbooks/<topic>.md`):** When asked to *"turn this into a runbook"*, extract reusable, step-by-step terminal commands and configuration checklists, replacing project-specific names with `<placeholders>`.

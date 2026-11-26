@@ -177,7 +177,9 @@ export function renderCollectionView({
                   </div>
                   <div>
                     <dt>Serves</dt>
-                    <dd>${escapeHtml(String(recipe.servings || 4))}</dd>
+                    <dd>${escapeHtml(String(recipe.servings || 4))}${
+                      recipe.servingSize ? ` <span class="meta-serving-size">(${escapeHtml(recipe.servingSize)})</span>` : ''
+                    }</dd>
                   </div>
                 </dl>
 

@@ -1,4 +1,5 @@
 import { mergeReferenceData } from './reference.js';
+import { mergeMealPrepData } from './mealPrep.js';
 
 /**
  * Normalizes a single tag into lowercase kebab-case without leading hashes.
@@ -130,6 +131,7 @@ export function normalizeRecipe(input, fallbackDividerId = 'weeknight') {
     prepMinutes: Number.isFinite(prepNum) && prepNum >= 0 ? Math.round(prepNum) : 0,
     cookMinutes: primaryMethod.cookMinutes,
     servings: Number.isFinite(servingsNum) && servingsNum > 0 ? Number(servingsNum) : 4,
+    servingSize: String(input?.servingSize || '').trim(),
     tags: parseTagsInput(input?.tags || []),
     ingredients: normalizeStringList(input?.ingredients),
     steps: primaryMethod.steps,
@@ -172,6 +174,7 @@ export function filterAndSortRecipes(
         recipe.title,
         recipe.summary,
         recipe.source,
+        recipe.servingSize,
         recipe.notes,
         ...(recipe.tags || []),
         ...(recipe.ingredients || []),
@@ -312,6 +315,12 @@ export function mergeCollectionSnapshots(localSnapshot, remoteSnapshot) {
     merged.referenceData = mergeReferenceData(
       localSnapshot?.referenceData,
       remoteSnapshot?.referenceData
+    );
+  }
+  if (localSnapshot?.mealPrepData || remoteSnapshot?.mealPrepData) {
+    merged.mealPrepData = mergeMealPrepData(
+      localSnapshot?.mealPrepData,
+      remoteSnapshot?.mealPrepData
     );
   }
   return merged;

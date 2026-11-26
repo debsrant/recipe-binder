@@ -3,6 +3,7 @@ import { DB_NAME, IS_TEST_STAGE } from '../config.js';
 import { DEFAULT_DIVIDERS, SEED_RECIPES } from '../data/seedRecipes.js';
 import { normalizeDivider, normalizeRecipe } from '../lib/collection.js';
 import { getDefaultReferenceData, normalizeReferenceData } from '../lib/reference.js';
+import { getDefaultMealPrepData, normalizeMealPrepData } from '../lib/mealPrep.js';
 
 export const db = new Dexie(DB_NAME);
 
@@ -39,17 +40,21 @@ export async function initDatabase() {
  * Reads the full local snapshot (recipes including tombstones, ordered dividers, referenceData, and timestamp).
  */
 export async function getSnapshot() {
-  const [recipes, dividers, divMeta, refMeta] = await Promise.all([
+  const [recipes, dividers, divMeta, refMeta, mealPrepMeta] = await Promise.all([
     db.recipes.toArray(),
     db.dividers.orderBy('order').toArray(),
     db.meta.get('dividersUpdatedMs'),
     db.meta.get('referenceData'),
+    db.meta.get('mealPrepData'),
   ]);
   return {
     recipes,
     dividers: dividers.length > 0 ? dividers : DEFAULT_DIVIDERS,
     dividersUpdatedMs: Number(divMeta?.value || 0),
     referenceData: refMeta?.value ? normalizeReferenceData(refMeta.value) : getDefaultReferenceData(),
+    mealPrepData: mealPrepMeta?.value
+      ? normalizeMealPrepData(mealPrepMeta.value)
+      : getDefaultMealPrepData(),
   };
 }
 
@@ -153,6 +158,15 @@ export async function saveReferenceData(referenceInput) {
 }
 
 /**
+ * Saves updated meal prep data (Cook Once Eat Thrice templates & freezer/leftover inventory).
+ */
+export async function saveMealPrepData(mealPrepInput) {
+  const normalized = normalizeMealPrepData(mealPrepInput);
+  await db.meta.put({ key: 'mealPrepData', value: normalized });
+  return normalized;
+}
+
+/**
  * Applies a merged snapshot (from cloud sync or merge import) into IndexedDB.
  */
 export async function applyMergedSnapshot(snapshot) {
@@ -164,6 +178,7 @@ export async function applyMergedSnapshot(snapshot) {
   const recipes = (snapshot?.recipes || []).map((r) => normalizeRecipe(r, fallbackId));
   const dividersUpdatedMs = Number(snapshot?.dividersUpdatedMs || Date.now());
   const hasRef = Boolean(snapshot?.referenceData);
+  const hasMealPrep = Boolean(snapshot?.mealPrepData);
 
   await db.transaction('rw', db.dividers, db.recipes, db.meta, async () => {
     if (dividers.length > 0) {
@@ -177,6 +192,12 @@ export async function applyMergedSnapshot(snapshot) {
       await db.meta.put({
         key: 'referenceData',
         value: normalizeReferenceData(snapshot.referenceData),
+      });
+    }
+    if (hasMealPrep) {
+      await db.meta.put({
+        key: 'mealPrepData',
+        value: normalizeMealPrepData(snapshot.mealPrepData),
       });
     }
     await db.meta.put({ key: 'dividersUpdatedMs', value: dividersUpdatedMs });
@@ -201,6 +222,7 @@ export async function replaceAllData(snapshot) {
   const recipes = (snapshot?.recipes || []).map((r) => normalizeRecipe(r, fallbackId));
   const dividersUpdatedMs = Number(snapshot?.dividersUpdatedMs || Date.now());
   const hasRef = Boolean(snapshot?.referenceData);
+  const hasMealPrep = Boolean(snapshot?.mealPrepData);
 
   await db.transaction('rw', db.dividers, db.recipes, db.meta, async () => {
     await db.dividers.clear();
@@ -213,6 +235,12 @@ export async function replaceAllData(snapshot) {
       await db.meta.put({
         key: 'referenceData',
         value: normalizeReferenceData(snapshot.referenceData),
+      });
+    }
+    if (hasMealPrep) {
+      await db.meta.put({
+        key: 'mealPrepData',
+        value: normalizeMealPrepData(snapshot.mealPrepData),
       });
     }
     await db.meta.put({ key: 'dividersUpdatedMs', value: dividersUpdatedMs });
@@ -234,6 +262,7 @@ export async function resetToSeedData() {
     dividersUpdatedMs: Date.now(),
     recipes: SEED_RECIPES.map((r) => ({ ...r, updatedMs: Date.now() })),
     referenceData: getDefaultReferenceData(),
+    mealPrepData: getDefaultMealPrepData(),
   });
 }
 
@@ -248,5 +277,6 @@ export async function clearAllTestData() {
     dividers: DEFAULT_DIVIDERS,
     dividersUpdatedMs: Date.now(),
     recipes: [],
+    mealPrepData: getDefaultMealPrepData(),
   });
 }

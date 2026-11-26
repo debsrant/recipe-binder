@@ -57,6 +57,18 @@ import {
   findIngredientDensity,
   getQuickEquivalents,
 } from '../src/lib/units.js';
+import {
+  adjustFreezerPortions,
+  buildMergedPrepTimeline,
+  deleteMealPrepItem,
+  getDefaultMealPrepData,
+  getFreezerItemStatus,
+  mergeMealPrepData,
+  normalizeBatchTemplate,
+  normalizeFreezerItem,
+  normalizeMealPrepData,
+  upsertMealPrepItem,
+} from '../src/lib/mealPrep.js';
 
 test('parseQuantityToken handles integers, decimals, slash fractions, mixed numbers, and Unicode', () => {
   assert.equal(parseQuantityToken('2'), 2);
@@ -949,4 +961,146 @@ test('referenceData includes spice substitutions and supports upsert, delete, pr
   });
   assert.equal(customFlavor.id, 'tarragon');
   assert.deepEqual(customFlavor.bestWith, ['Chicken', 'Eggs']);
+});
+
+test('servingSize persists across normalizeRecipe, search, and Markdown round-trip', () => {
+  const recipe = normalizeRecipe({
+    id: 'rec-soup',
+    title: 'Butternut Soup',
+    dividerId: 'weeknight',
+    servings: 6,
+    servingSize: '1 1/2 cups',
+    ingredients: ['2 lb butternut squash', '4 cups broth'],
+    steps: ['Roast squash and blend with warm broth.'],
+  });
+  assert.equal(recipe.servingSize, '1 1/2 cups');
+
+  const searchHits = filterAndSortRecipes([recipe], { query: '1/2 cups' });
+  assert.equal(searchHits.length, 1);
+
+  const md = recipeToMarkdown(recipe, { dividerName: 'Weeknight' });
+  assert.ok(md.includes('servingSize: "1 1/2 cups"'));
+  assert.ok(md.includes('1 1/2 cups each'));
+
+  const parsed = parseMarkdownRecipe(md);
+  assert.equal(parsed.servings, 6);
+  assert.equal(parsed.servingSize, '1 1/2 cups');
+});
+
+test('mealPrep freezer status, portions, CRUD, and snapshot merge work offline & synced', () => {
+  const defaults = getDefaultMealPrepData();
+  assert.ok(defaults.templates.some((t) => t.id === 'batch-sunday-chicken'));
+
+  const freshFreezer = normalizeFreezerItem({
+    id: 'fr-1',
+    title: 'Chili',
+    storageLocation: 'freezer',
+    portions: 4,
+    servingSize: '1 1/2 cups',
+    storedDate: '2026-11-01',
+    bestByDate: '2027-01-30',
+  });
+  assert.equal(getFreezerItemStatus(freshFreezer, '2026-11-26').status, 'fresh');
+
+  const fridgeSoon = normalizeFreezerItem({
+    id: 'fr-2',
+    title: 'Chicken Salad',
+    storageLocation: 'fridge',
+    portions: 2,
+    storedDate: '2026-11-23',
+    bestByDate: '2026-11-27',
+  });
+  assert.equal(getFreezerItemStatus(fridgeSoon, '2026-11-26').status, 'use-soon');
+
+  const expiredFreezer = { ...freshFreezer, bestByDate: '2026-11-20' };
+  assert.equal(getFreezerItemStatus(expiredFreezer, '2026-11-26').status, 'expired');
+
+  const decremented = adjustFreezerPortions(freshFreezer, -4);
+  assert.equal(decremented.portions, 0);
+  assert.equal(getFreezerItemStatus(decremented, '2026-11-26').status, 'empty');
+
+  const added = upsertMealPrepItem([], freshFreezer, normalizeFreezerItem);
+  assert.equal(added.length, 1);
+  const tombstoned = deleteMealPrepItem(added, 'fr-1');
+  assert.equal(tombstoned[0].deleted, true);
+
+  const customTpl = normalizeBatchTemplate({
+    title: 'Pulled Pork 3 Ways',
+    baseLabel: 'Braise 4 lb shoulder',
+    derivatives: [{ title: 'Tacos', dayOffset: 2 }],
+    updatedMs: 900,
+  });
+  const mergedMp = mergeMealPrepData(
+    { templates: [{ ...customTpl, updatedMs: 100 }], freezerItems: [] },
+    { templates: [customTpl], freezerItems: [freshFreezer] }
+  );
+  assert.ok(mergedMp.templates.some((t) => t.id === customTpl.id && t.updatedMs === 900));
+  assert.equal(mergedMp.freezerItems.length, 1);
+
+  const snapMerged = mergeCollectionSnapshots(
+    { dividers: [], recipes: [], mealPrepData: { templates: [], freezerItems: [] } },
+    { dividers: [], recipes: [], mealPrepData: { templates: [customTpl], freezerItems: [freshFreezer] } }
+  );
+  assert.equal(snapMerged.mealPrepData.freezerItems.length, 1);
+});
+
+test('buildMergedPrepTimeline extracts temperatures, scales ingredients, and orders phases longest first', () => {
+  const salad = normalizeRecipe({
+    id: 'rec-salad',
+    title: 'Quick Salad',
+    cookMinutes: 0,
+    servings: 2,
+    servingSize: '1 cup',
+    ingredients: ['2 cucumbers, sliced'],
+    methods: [
+      {
+        id: 'nocook',
+        name: 'No-Cook',
+        cookMinutes: 0,
+        steps: ['Slice cucumbers thinly.', 'Toss with dressing just before serving.'],
+      },
+    ],
+  });
+  const roast = normalizeRecipe({
+    id: 'rec-roast',
+    title: 'Roast Chicken',
+    cookMinutes: 40,
+    servings: 4,
+    servingSize: '2 thighs',
+    ingredients: ['1 1/2 lb chicken thighs'],
+    methods: [
+      {
+        id: 'oven',
+        name: 'Oven',
+        cookMinutes: 40,
+        steps: [
+          'Preheat oven to 400 F.',
+          'Season chicken on sheet pan.',
+          'Roast 40 minutes until golden.',
+          'Rest 5 minutes and garnish with herbs to serve.',
+        ],
+      },
+    ],
+  });
+
+  const timeline = buildMergedPrepTimeline([
+    { recipe: salad, scale: 2 },
+    { recipe: roast, scale: 1.5, methodId: 'oven' },
+  ]);
+
+  assert.ok(timeline.ovenTemps.includes('400F'));
+  assert.equal(timeline.ingredientsByRecipe.length, 2);
+  assert.equal(timeline.ingredientsByRecipe[0].scaledServings, 4);
+  assert.equal(timeline.ingredientsByRecipe[1].servingSize, '2 thighs');
+  assert.ok(timeline.ingredientsByRecipe[1].ingredients[0].startsWith('2 1/4 lb'));
+
+  const preheat = timeline.phases.find((p) => p.id === 'preheat');
+  const prep = timeline.phases.find((p) => p.id === 'prep');
+  const cook = timeline.phases.find((p) => p.id === 'cook');
+  const finish = timeline.phases.find((p) => p.id === 'finish');
+
+  assert.equal(preheat.steps.length, 1);
+  assert.ok(prep.steps.some((s) => s.recipeId === 'rec-salad'));
+  assert.ok(cook.steps.some((s) => s.recipeId === 'rec-roast'));
+  assert.equal(finish.steps.length, 2);
 });

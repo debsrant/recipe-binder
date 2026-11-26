@@ -185,8 +185,8 @@ function renderClassicSheet({
           <span><strong>Total:</strong> ${escapeHtml(totalDisplay)}</span>
           <span class="classic-meta-sep" aria-hidden="true">·</span>
           <span><strong>Yield:</strong> ${escapeHtml(scaledServings)} servings${
-            scaleFactor !== 1 ? ` (${scaleFactor}x)` : ''
-          }</span>
+            recipe.servingSize ? ` (${escapeHtml(recipe.servingSize)} each)` : ''
+          }${scaleFactor !== 1 ? ` (${scaleFactor}x)` : ''}</span>
         </div>
       </header>
 
@@ -309,6 +309,9 @@ export function renderDetailView({
         <button type="button" class="btn btn-outline" data-action="duplicate-recipe" data-recipe-id="${escapeHtml(
           recipe.id
         )}">Duplicate</button>
+        <button type="button" class="btn btn-outline" data-action="send-recipe-to-freezer" data-recipe-id="${escapeHtml(
+          recipe.id
+        )}">Send to Freezer</button>
         <button type="button" class="btn btn-outline" data-action="export-recipe-md" data-recipe-id="${escapeHtml(
           recipe.id
         )}">Export .md</button>
@@ -494,7 +497,9 @@ export function renderDetailView({
             </div>
             <div class="kpi-box">
               <span class="kpi-label">Yield (${scaleFactor}x)</span>
-              <span class="kpi-value">${escapeHtml(scaledServings)} servings</span>
+              <span class="kpi-value">${escapeHtml(scaledServings)} servings${
+                recipe.servingSize ? ` · ${escapeHtml(recipe.servingSize)}` : ''
+              }</span>
             </div>
             <div class="kpi-box kpi-scale-box">
               <span class="kpi-label">Scale Batch</span>

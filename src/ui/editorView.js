@@ -214,6 +214,17 @@ export function renderEditorView({ recipe, dividers, isNew }) {
           </div>
 
           <div class="form-field form-span-2">
+            <label for="rec-serving-size">Serving Yield Size (per portion — great for freezer labels &amp; meal prep)</label>
+            <input
+              id="rec-serving-size"
+              name="servingSize"
+              type="text"
+              value="${escapeHtml(activeRecipe.servingSize || '')}"
+              placeholder="e.g., 1 cup, 2 thighs + pan sauce, 1 cookie, 2 pancakes"
+            />
+          </div>
+
+          <div class="form-field form-span-2">
             <label for="rec-tags">Tags (comma-separated)</label>
             <input
               id="rec-tags"

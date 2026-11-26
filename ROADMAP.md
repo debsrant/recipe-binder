@@ -43,9 +43,9 @@ Grounded in `zed/recipe-binder-roadmap.md` ("The Modern Digital Kitchen Binder")
 
 ## Phase 5: Batch Cooking & Meal Prep Engine
 
-- [ ] **"Cook Once, Eat Thrice" Templates:** Link a batch base (e.g., pulled pork) to derivative weeknight recipes.
-- [ ] **Merged Prep Timelines:** Combine multiple selected recipes into one chronological prep checklist.
-- [ ] **Freezer & Leftover Inventory:** "Send to Freezer" portion/date tracker with reheating notes.
+- [x] **"Cook Once, Eat Thrice" Templates:** Link a batch base (e.g., pulled pork) to derivative weeknight recipes.
+- [x] **Merged Prep Timelines:** Combine multiple selected recipes into one chronological prep checklist.
+- [x] **Freezer & Leftover Inventory:** "Send to Freezer" portion/date tracker with reheating notes.
 
 ---
 

@@ -19,6 +19,7 @@ export const SEED_RECIPES = [
     prepMinutes: 10,
     cookMinutes: 20,
     servings: 4,
+    servingSize: '2 thighs + pan sauce',
     tags: ['30-mins', 'one-pan', 'gluten-free'],
     ingredients: [
       '1 1/2 lb boneless skinless chicken thighs, patted dry',
@@ -83,6 +84,7 @@ export const SEED_RECIPES = [
     prepMinutes: 20,
     cookMinutes: 12,
     servings: 24,
+    servingSize: '1 cookie',
     tags: ['make-ahead', 'sweet', 'crowd-pleaser'],
     ingredients: [
       '1 cup unsalted butter (2 sticks)',
@@ -121,6 +123,7 @@ export const SEED_RECIPES = [
     prepMinutes: 10,
     cookMinutes: 15,
     servings: 4,
+    servingSize: '2 pancakes',
     tags: ['30-mins', 'kid-friendly', 'vegetarian'],
     ingredients: [
       '1 1/2 cups all-purpose flour',
@@ -156,6 +159,7 @@ export const SEED_RECIPES = [
     prepMinutes: 12,
     cookMinutes: 0,
     servings: 4,
+    servingSize: '1 cup',
     tags: ['no-cook', 'dairy-free', 'gluten-free', '30-mins'],
     ingredients: [
       '2 English cucumbers, thinly sliced',

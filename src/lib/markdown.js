@@ -127,6 +127,9 @@ export function recipeToMarkdown(recipe, { dividerName = '', scaleFactor = 1 } =
     fmLines.push(`methods: [${methods.map((m) => yamlQuote(m.name || 'Method')).join(', ')}]`);
   }
   fmLines.push(`servings: ${Number.isInteger(scaledServingsNum) ? scaledServingsNum : Number(scaledServingsNum.toFixed(2))}`);
+  if (recipe?.servingSize) {
+    fmLines.push(`servingSize: ${yamlQuote(recipe.servingSize)}`);
+  }
   fmLines.push(`tags: [${tags.map((t) => yamlQuote(t)).join(', ')}]`);
   fmLines.push(`favorite: ${Boolean(recipe?.favorite)}`);
   if (recipe?.createdAt) fmLines.push(`createdAt: ${yamlQuote(recipe.createdAt)}`);
@@ -140,11 +143,12 @@ export function recipeToMarkdown(recipe, { dividerName = '', scaleFactor = 1 } =
     body.push('', `*${String(recipe.summary).trim()}*`);
   }
 
+  const servingSizeSuffix = recipe?.servingSize ? ` (${String(recipe.servingSize).trim()} each)` : '';
   const metaParts = [
     `**Prep:** ${formatDurationCompact(prep)}`,
     `**Cook:** ${formatDurationCompact(primaryCook)}`,
     `**Total:** ${formatDurationCompact(total)}`,
-    `**Servings:** ${scaledServingsLabel}${factor !== 1 ? ` (${factor}x)` : ''}`,
+    `**Servings:** ${scaledServingsLabel}${servingSizeSuffix}${factor !== 1 ? ` [${factor}x]` : ''}`,
   ];
   body.push('', metaParts.join(' | '));
   if (recipe?.source) {
@@ -320,6 +324,7 @@ export function parseMarkdownRecipe(
   let bodyCook = 0;
   let bodyTotal = 0;
   let bodyServings = 0;
+  let bodyServingSize = '';
   let bodyTags = [];
 
   const ingredients = [];
@@ -414,8 +419,12 @@ export function parseMarkdownRecipe(
           else if (k.startsWith('cook')) bodyCook = parseMinutesValue(v);
           else if (k.startsWith('total')) bodyTotal = parseMinutesValue(v);
           else if (k.startsWith('serv') || k.startsWith('yield')) {
-            const num = parseFloat(v.replace(/[^\d.]/g, ''));
+            const num = parseFloat(v.match(/^\d+(?:\.\d+)?/)?.[0] || '');
             if (Number.isFinite(num) && num > 0) bodyServings = num;
+            const parenMatch = v.match(/\(([^)]+)\)/);
+            if (parenMatch && !/^\d+(?:\.\d+)?x$/i.test(parenMatch[1].trim())) {
+              bodyServingSize = parenMatch[1].replace(/\s+each$/i, '').trim();
+            }
           } else if (k === 'source' || k === 'from') {
             bodySource = v;
           } else if (k === 'tags') {
@@ -524,6 +533,13 @@ export function parseMarkdownRecipe(
       : parseFloat(String(rawServings || '').match(/\d+(?:\.\d+)?/)?.[0] || '');
   const servings = Number.isFinite(parsedServings) && parsedServings > 0 ? parsedServings : 4;
 
+  const rawServingSize =
+    frontmatter.servingSize ??
+    frontmatter.serving_size ??
+    frontmatter.portionSize ??
+    bodyServingSize;
+  const servingSize = String(rawServingSize || '').trim();
+
   const fmTags = frontmatter.tags ? parseTagsInput(frontmatter.tags) : bodyTags;
   const normalizedTags = fmTags.map((t) => normalizeTag(t)).filter(Boolean);
   const notes = String(frontmatter.notes || notesLines.join('\n')).trim();
@@ -539,6 +555,7 @@ export function parseMarkdownRecipe(
     prepMinutes,
     cookMinutes: methods[0].cookMinutes || cookMinutes,
     servings,
+    servingSize,
     tags: normalizedTags,
     ingredients,
     steps: methods[0].steps,
