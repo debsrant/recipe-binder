@@ -1011,16 +1011,16 @@ async function handleAction(action, target) {
     const id = target.dataset.recipeId || state.selectedRecipeId;
     const recipe = state.recipes.find((r) => r.id === id && !r.deleted);
     if (!recipe) return;
+    const scaleRaw = Number(target.dataset.scale || state.scaleFactor || 1);
+    const scale = Number.isFinite(scaleRaw) && scaleRaw > 0 ? scaleRaw : 1;
+    const portions = Math.max(0.5, Math.round((Number(recipe.servings) || 4) * scale * 100) / 100);
     if (state.view === 'detail') {
       resetCookSession(true);
     }
-    const scaleRaw = Number(target.dataset.scale || state.scaleFactor || 1);
-    const scale = Number.isFinite(scaleRaw) && scaleRaw > 0 ? scaleRaw : 1;
-    const portions = Math.max(0.5, Math.round((Number(recipe.servings) || 4) * scale * 10) / 10);
     const today = new Date().toISOString().slice(0, 10);
     const bestBy = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
-    state.editingFreezerId = null;
-    state.prefillFreezer = {
+    const newItem = normalizeFreezerItem({
+      id: generateId('frz'),
       recipeId: recipe.id,
       title: recipe.title,
       storageLocation: 'freezer',
@@ -1029,11 +1029,23 @@ async function handleAction(action, target) {
       storedDate: today,
       bestByDate: bestBy,
       reheatNotes: '',
-    };
+    });
+    const nextItems = upsertMealPrepItem(
+      state.mealPrepData.freezerItems || [],
+      newItem,
+      normalizeFreezerItem
+    );
+    state.freezerFilter = 'all';
+    state.freezerQuery = '';
+    state.prefillFreezer = null;
+    state.editingFreezerId = newItem.id;
     state.view = 'mealprep';
     state.mealPrepTab = 'freezer';
-    setNotice('positive', `Pre-filled freezer log for "${recipe.title}". Confirm portions & save.`);
-    render();
+    await persistMealPrepPatch(
+      { freezerItems: nextItems },
+      `Sent "${recipe.title}" (${portions} portion${portions === 1 ? '' : 's'}) to Freezer Inventory — edit portions or reheating notes on the right if needed.`
+    );
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     return;
   }
 
@@ -1530,7 +1542,11 @@ document.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
   }
-  handleAction(action, actionEl);
+  Promise.resolve(handleAction(action, actionEl)).catch((err) => {
+    console.error('Action failed:', action, err);
+    setNotice('danger', err?.message || 'Action failed.');
+    render();
+  });
 });
 
 document.addEventListener('keydown', (event) => {

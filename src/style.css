@@ -1954,6 +1954,11 @@ textarea {
   border-left-color: var(--text-muted);
 }
 
+.freezer-card.is-editing {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
 .freezer-card-top {
   display: flex;
   justify-content: space-between;

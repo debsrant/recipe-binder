@@ -52,7 +52,9 @@ function renderFreezerTab({
   editingFreezerId,
   prefillFreezer,
 }) {
-  const activeItems = (freezerItems || []).filter((i) => !i.deleted);
+  const activeItems = [...(freezerItems || [])]
+    .filter((i) => !i.deleted)
+    .sort((a, b) => (b.updatedMs || 0) - (a.updatedMs || 0));
   const statuses = activeItems.map((item) => ({
     item,
     statusInfo: getFreezerItemStatus(item),
@@ -118,7 +120,9 @@ function renderFreezerTab({
       ? filtered
           .map(
             ({ item, statusInfo }) => `
-              <article class="freezer-card is-${escapeHtml(statusInfo.status)}">
+              <article class="freezer-card is-${escapeHtml(statusInfo.status)}${
+                editingFreezerId === item.id ? ' is-editing' : ''
+              }">
                 <div class="freezer-card-top">
                   <div class="freezer-card-title-group">
                     <div class="freezer-badges-row">
@@ -196,7 +200,7 @@ function renderFreezerTab({
           )
           .join('')
       : `<div class="empty-state-compact">
-           <p>No stored portions match the current filter. Use <strong>Send to Freezer</strong> on any recipe card or add an entry below.</p>
+           <p>No stored portions match the current filter. Open any recipe and click <strong>Send to Freezer</strong>, or log a batch on the right.</p>
          </div>`;
 
   return `
@@ -287,7 +291,7 @@ function renderFreezerTab({
                 name="portions"
                 type="number"
                 min="0"
-                step="0.5"
+                step="any"
                 value="${escapeHtml(String(formModel.portions ?? 4))}"
               />
             </div>
