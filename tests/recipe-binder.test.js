@@ -69,6 +69,18 @@ import {
   normalizeMealPrepData,
   upsertMealPrepItem,
 } from '../src/lib/mealPrep.js';
+import {
+  collectBinderIngredients,
+  cyclePantryStatus,
+  deletePantryItem,
+  extractCoreIngredientName,
+  getDefaultPantryData,
+  matchRecipesByIngredients,
+  mergePantryData,
+  normalizeIngredientKey,
+  normalizePantryItem,
+  upsertPantryItem,
+} from '../src/lib/pantry.js';
 
 test('parseQuantityToken handles integers, decimals, slash fractions, mixed numbers, and Unicode', () => {
   assert.equal(parseQuantityToken('2'), 2);
@@ -1106,4 +1118,106 @@ test('buildMergedPrepTimeline extracts temperatures, scales ingredients, and ord
   assert.ok(prep.steps.some((s) => s.recipeId === 'rec-salad'));
   assert.ok(cook.steps.some((s) => s.recipeId === 'rec-roast'));
   assert.equal(finish.steps.length, 2);
+});
+
+test('pantry ingredient normalization, CRUD, and mergeCollectionSnapshots propagate pantryData', () => {
+  assert.equal(extractCoreIngredientName('1 1/2 lb boneless skinless chicken thighs, patted dry'), 'Boneless skinless chicken thighs');
+  assert.equal(normalizeIngredientKey('1 1/2 lb boneless skinless chicken thighs, patted dry'), 'chicken thigh');
+  assert.equal(normalizeIngredientKey('2 tbsp unsalted butter, divided'), 'butter');
+  assert.equal(normalizeIngredientKey('1/4 cup fresh dill, chopped'), 'dill');
+
+  const defaults = getDefaultPantryData();
+  assert.ok(defaults.items.some((i) => i.id === 'pan-kosher-salt' && i.alwaysStocked));
+
+  const chicken = normalizePantryItem({
+    id: 'pan-chicken',
+    name: 'Chicken Thighs',
+    category: 'meat-seafood',
+    location: 'fridge',
+    status: 'in-stock',
+  });
+  const cycled = cyclePantryStatus(chicken);
+  assert.equal(cycled.status, 'low');
+  assert.equal(cyclePantryStatus(cycled).status, 'out');
+
+  const upserted = upsertPantryItem(defaults.items, chicken);
+  assert.equal(upserted.length, defaults.items.length + 1);
+  const removed = deletePantryItem(upserted, 'pan-chicken');
+  assert.equal(removed.find((i) => i.id === 'pan-chicken').deleted, true);
+
+  const merged = mergePantryData(
+    { items: [{ ...chicken, updatedMs: 100 }] },
+    { items: [{ ...chicken, status: 'low', updatedMs: 900 }] }
+  );
+  assert.equal(merged.items.find((i) => i.id === 'pan-chicken').status, 'low');
+
+  const snapMerged = mergeCollectionSnapshots(
+    { dividers: [], recipes: [], pantryData: { items: [] } },
+    { dividers: [], recipes: [], pantryData: { items: [chicken] } }
+  );
+  assert.ok(snapMerged.pantryData.items.some((i) => i.id === 'pan-chicken'));
+});
+
+test('matchRecipesByIngredients ranks recipes by readiness, includes staples optionally, and uses word boundaries', () => {
+  const salad = normalizeRecipe({
+    id: 'rec-cuc',
+    title: 'Cucumber Dill Salad',
+    ingredients: [
+      '2 English cucumbers, thinly sliced',
+      '1/3 cup fresh dill, chopped',
+      '2 tbsp olive oil',
+      '1/2 tsp kosher salt',
+    ],
+    steps: ['Toss together.'],
+  });
+  const soup = normalizeRecipe({
+    id: 'rec-soup',
+    title: 'Diced Tomato Soup',
+    ingredients: [
+      '2 cans diced tomatoes',
+      '1 tbsp olive oil',
+      '2 cloves garlic, minced',
+      '1 cup heavy cream',
+    ],
+    steps: ['Simmer tomatoes and blend with cream.'],
+  });
+  const deletedRec = normalizeRecipe({
+    id: 'rec-del',
+    title: 'Deleted Recipe',
+    ingredients: ['1 cup sugar'],
+    deleted: true,
+  });
+
+  const binderIngs = collectBinderIngredients([salad, soup, deletedRec]);
+  assert.ok(binderIngs.some((i) => i.key === 'olive oil' && i.recipeCount === 2));
+  assert.equal(binderIngs.some((i) => i.key === 'sugar'), false);
+
+  const staples = getDefaultPantryData().items;
+
+  // "ice" must NOT false-match "diced tomatoes"
+  const iceMatches = matchRecipesByIngredients([soup], ['ice'], {
+    includeAlwaysStocked: false,
+    pantryItems: staples,
+  });
+  assert.equal(iceMatches.length, 0);
+
+  // With staples (olive oil + kosher salt), selecting cucumber + dill makes salad 100% ready
+  const readyMatches = matchRecipesByIngredients([salad, soup], ['Cucumber', 'Dill'], {
+    includeAlwaysStocked: true,
+    pantryItems: staples,
+    mode: 'ready',
+  });
+  assert.equal(readyMatches.length, 1);
+  assert.equal(readyMatches[0].recipe.id, 'rec-cuc');
+  assert.equal(readyMatches[0].canMakeNow, true);
+
+  // Without staples, cucumber + dill only matches 2/4 of salad
+  const noStaples = matchRecipesByIngredients([salad], ['Cucumber', 'Dill'], {
+    includeAlwaysStocked: false,
+    pantryItems: staples,
+    mode: 'all',
+  });
+  assert.equal(noStaples[0].matchedCount, 2);
+  assert.equal(noStaples[0].missingCount, 2);
+  assert.equal(noStaples[0].canMakeNow, false);
 });

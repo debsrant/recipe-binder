@@ -52,5 +52,5 @@ Grounded in `zed/recipe-binder-roadmap.md` ("The Modern Digital Kitchen Binder")
 ## Phase 6: Dynamic Pantry & Grocery Ecosystem
 
 - [ ] **Smart Grocery List Aggregation:** Merge duplicate ingredients across planned recipes and group by grocery aisle.
-- [ ] **Virtual Pantry & "Always Stocked" Staples:** Track staples and filter the binder by *"What Can I Make?"* with ingredients on hand.
+- [x] **Virtual Pantry & "Always Stocked" Staples:** Track staples and filter the binder by *"What Can I Make?"* with ingredients on hand.
 - [ ] **Household Shared Binders:** Multi-user shared binder & live grocery checklist collaboration.

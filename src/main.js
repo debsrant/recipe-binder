@@ -10,6 +10,7 @@ import {
   resetToSeedData,
   saveDividers,
   saveMealPrepData,
+  savePantryData,
   saveRecipe,
   saveReferenceData,
   softDeleteRecipe,
@@ -32,6 +33,16 @@ import {
   normalizeFreezerItem,
   upsertMealPrepItem,
 } from './lib/mealPrep.js';
+import {
+  cyclePantryStatus,
+  deletePantryItem,
+  extractCoreIngredientName,
+  getDefaultPantryData,
+  normalizeIngredientKey,
+  normalizePantryItem,
+  toggleAlwaysStocked,
+  upsertPantryItem,
+} from './lib/pantry.js';
 import { parseImportedContent, parseTextRecipe } from './lib/recipeImport.js';
 import {
   deleteFlavorItem,
@@ -50,6 +61,7 @@ import {
   initCloudSync,
   pushDividersToCloud,
   pushMealPrepDataToCloud,
+  pushPantryDataToCloud,
   pushRecipeToCloud,
   pushReferenceDataToCloud,
   signInWithEmail,
@@ -71,6 +83,7 @@ import {
 } from './ui/helpers.js';
 import { renderImportView } from './ui/importView.js';
 import { renderMealPrepView } from './ui/mealPrepView.js';
+import { renderPantryView } from './ui/pantryView.js';
 import {
   renderConverterResultHtml,
   renderReferenceView,
@@ -127,6 +140,7 @@ const state = {
   dividersUpdatedMs: 0,
   referenceData: getDefaultReferenceData(),
   mealPrepData: getDefaultMealPrepData(),
+  pantryData: getDefaultPantryData(),
   selectedRecipeId: null,
   editingRecipeId: null,
   draftRecipe: null,
@@ -148,6 +162,15 @@ const state = {
   editingTemplateId: null,
   timelineSelections: {},
   checkedTimelineSteps: new Set(),
+  pantryTab: 'inventory',
+  pantryCategory: 'all',
+  pantryStatusFilter: 'all',
+  pantryQuery: '',
+  editingPantryId: null,
+  matcherSelectedNames: new Set(),
+  matcherIncludeStaples: true,
+  matcherFilter: 'all',
+  matcherSearch: '',
   converter: {
     mode: 'volume-weight',
     value: '1',
@@ -291,6 +314,7 @@ function renderNavBar() {
         <button type="button" class="nav-tab ${collectionActive ? 'is-active' : ''}" data-action="nav-view" data-view="collection">Collection</button>
         <button type="button" class="nav-tab ${state.view === 'import' ? 'is-active' : ''}" data-action="nav-view" data-view="import">Import</button>
         <button type="button" class="nav-tab ${state.view === 'mealprep' ? 'is-active' : ''}" data-action="nav-view" data-view="mealprep">Meal Prep</button>
+        <button type="button" class="nav-tab ${state.view === 'pantry' ? 'is-active' : ''}" data-action="nav-view" data-view="pantry">Pantry</button>
         <button type="button" class="nav-tab ${state.view === 'reference' ? 'is-active' : ''}" data-action="nav-view" data-view="reference">Reference</button>
         <button type="button" class="nav-tab ${state.view === 'dividers' ? 'is-active' : ''}" data-action="nav-view" data-view="dividers">Dividers</button>
         <button type="button" class="nav-tab ${state.view === 'sync' ? 'is-active' : ''}" data-action="nav-view" data-view="sync">Sync & Backup</button>
@@ -372,6 +396,23 @@ function renderMainContent() {
     });
   }
 
+  if (state.view === 'pantry') {
+    return renderPantryView({
+      activeTab: state.pantryTab,
+      pantryData: state.pantryData,
+      recipes: state.recipes,
+      dividers: state.dividers,
+      pantryCategory: state.pantryCategory,
+      pantryStatusFilter: state.pantryStatusFilter,
+      pantryQuery: state.pantryQuery,
+      editingPantryId: state.editingPantryId,
+      matcherSelectedNames: state.matcherSelectedNames,
+      matcherIncludeStaples: state.matcherIncludeStaples,
+      matcherFilter: state.matcherFilter,
+      matcherSearch: state.matcherSearch,
+    });
+  }
+
   if (state.view === 'reference') {
     return renderReferenceView({
       activeTab: state.referenceTab,
@@ -420,6 +461,8 @@ function renderMainContent() {
 const PRESERVED_SEARCH_IDS = new Set([
   'recipe-search-input',
   'mealprep-freezer-search',
+  'pantry-search-input',
+  'matcher-ingredient-search',
   'reference-sub-search',
   'reference-chart-search',
   'reference-technique-search',
@@ -462,6 +505,7 @@ function applySnapshotToState(snapshot) {
   state.dividersUpdatedMs = Number(snapshot.dividersUpdatedMs || 0);
   state.referenceData = snapshot.referenceData || getDefaultReferenceData();
   state.mealPrepData = snapshot.mealPrepData || getDefaultMealPrepData();
+  state.pantryData = snapshot.pantryData || getDefaultPantryData();
   if (
     state.activeDividerId !== 'all' &&
     !state.dividers.some((d) => d.id === state.activeDividerId)
@@ -497,6 +541,21 @@ async function persistMealPrepPatch(patch, noticeMsg) {
   render();
   pushMealPrepDataToCloud(saved).catch((err) => {
     console.error('Meal prep cloud sync failed:', err);
+  });
+}
+
+async function persistPantryPatch(patch, noticeMsg) {
+  const saved = await savePantryData({
+    ...state.pantryData,
+    ...patch,
+  });
+  state.pantryData = saved;
+  if (noticeMsg) {
+    setNotice('positive', noticeMsg);
+  }
+  render();
+  pushPantryDataToCloud(saved).catch((err) => {
+    console.error('Pantry cloud sync failed:', err);
   });
 }
 
@@ -1138,6 +1197,224 @@ async function handleAction(action, target) {
     return;
   }
 
+  if (action === 'set-pantry-tab') {
+    state.pantryTab = target.dataset.tab === 'matcher' ? 'matcher' : 'inventory';
+    render();
+    return;
+  }
+
+  if (action === 'open-pantry-matcher') {
+    state.view = 'pantry';
+    state.pantryTab = 'matcher';
+    if (state.matcherSelectedNames.size === 0) {
+      const next = new Set();
+      for (const item of state.pantryData.items || []) {
+        if (!item.deleted && item.status !== 'out') {
+          next.add(item.name);
+        }
+      }
+      state.matcherSelectedNames = next;
+    }
+    render();
+    return;
+  }
+
+  if (action === 'set-pantry-status-filter') {
+    state.pantryStatusFilter = target.dataset.filter || 'all';
+    render();
+    return;
+  }
+
+  if (action === 'cycle-pantry-status') {
+    const id = target.dataset.itemId;
+    const items = state.pantryData.items || [];
+    const idx = items.findIndex((i) => i.id === id);
+    if (idx < 0) return;
+    const updated = cyclePantryStatus(items[idx]);
+    const nextItems = [...items];
+    nextItems[idx] = updated;
+    await persistPantryPatch({ items: nextItems });
+    return;
+  }
+
+  if (action === 'toggle-pantry-staple') {
+    const id = target.dataset.itemId;
+    const items = state.pantryData.items || [];
+    const idx = items.findIndex((i) => i.id === id);
+    if (idx < 0) return;
+    const updated = toggleAlwaysStocked(items[idx]);
+    const nextItems = [...items];
+    nextItems[idx] = updated;
+    await persistPantryPatch(
+      { items: nextItems },
+      updated.alwaysStocked
+        ? `Marked "${updated.name}" as an Always-Stocked staple.`
+        : `Removed Always-Stocked staple flag from "${updated.name}".`
+    );
+    return;
+  }
+
+  if (action === 'edit-pantry-item') {
+    state.editingPantryId = target.dataset.itemId || null;
+    state.pantryTab = 'inventory';
+    render();
+    return;
+  }
+
+  if (action === 'cancel-pantry-edit') {
+    state.editingPantryId = null;
+    render();
+    return;
+  }
+
+  if (action === 'delete-pantry-item') {
+    const id = target.dataset.itemId;
+    const item = (state.pantryData.items || []).find((i) => i.id === id);
+    if (!item || !window.confirm(`Remove "${item.name}" from pantry inventory?`)) return;
+    const nextItems = deletePantryItem(state.pantryData.items || [], id);
+    if (state.editingPantryId === id) {
+      state.editingPantryId = null;
+    }
+    await persistPantryPatch({ items: nextItems }, `Removed "${item.name}" from pantry.`);
+    return;
+  }
+
+  if (action === 'quick-add-pantry-ingredient') {
+    const name = String(target.dataset.ingredientName || '').trim();
+    if (!name) return;
+    const key = normalizeIngredientKey(name);
+    const existing = (state.pantryData.items || []).find(
+      (i) => !i.deleted && normalizeIngredientKey(i.name) === key
+    );
+    if (existing) {
+      setNotice('warning', `"${existing.name}" is already in your pantry.`);
+      render();
+      return;
+    }
+    const newItem = normalizePantryItem({
+      id: generateId('pan'),
+      name,
+      category: 'other',
+      location: 'pantry',
+      status: 'in-stock',
+    });
+    const nextItems = upsertPantryItem(state.pantryData.items || [], newItem);
+    await persistPantryPatch({ items: nextItems }, `Added "${name}" to pantry.`);
+    return;
+  }
+
+  if (action === 'toggle-matcher-ingredient') {
+    const name = String(target.dataset.ingredientName || '').trim();
+    const key = normalizeIngredientKey(name);
+    if (!key) return;
+    const next = new Set(state.matcherSelectedNames);
+    let removed = false;
+    for (const existingName of Array.from(next)) {
+      if (normalizeIngredientKey(existingName) === key) {
+        next.delete(existingName);
+        removed = true;
+      }
+    }
+    if (!removed) {
+      next.add(name);
+    }
+    state.matcherSelectedNames = next;
+    render();
+    return;
+  }
+
+  if (action === 'matcher-use-pantry') {
+    const next = new Set();
+    for (const item of state.pantryData.items || []) {
+      if (!item.deleted && item.status !== 'out') {
+        next.add(item.name);
+      }
+    }
+    state.matcherSelectedNames = next;
+    render();
+    return;
+  }
+
+  if (action === 'matcher-clear') {
+    state.matcherSelectedNames = new Set();
+    render();
+    return;
+  }
+
+  if (action === 'set-matcher-filter') {
+    state.matcherFilter = target.dataset.filter || 'all';
+    render();
+    return;
+  }
+
+  if (action === 'add-missing-to-pantry') {
+    const recipeId = target.dataset.recipeId;
+    const recipe = state.recipes.find((r) => r.id === recipeId && !r.deleted);
+    if (!recipe) return;
+
+    const availKeys = new Set();
+    for (const name of state.matcherSelectedNames || []) {
+      const k = normalizeIngredientKey(name);
+      if (k) availKeys.add(k);
+    }
+    if (state.matcherIncludeStaples) {
+      for (const item of state.pantryData.items || []) {
+        if (!item.deleted && item.alwaysStocked && item.status !== 'out') {
+          const k = normalizeIngredientKey(item.name);
+          if (k) availKeys.add(k);
+        }
+      }
+    }
+
+    let nextItems = [...(state.pantryData.items || [])];
+    const trackedMap = new Map(
+      nextItems
+        .filter((i) => !i.deleted)
+        .map((i) => [normalizeIngredientKey(i.name), i])
+    );
+
+    let addedCount = 0;
+    for (const line of recipe.ingredients || []) {
+      const k = normalizeIngredientKey(line);
+      if (!k) continue;
+      const isAvail =
+        availKeys.has(k) ||
+        Array.from(availKeys).some((a) => k.includes(a) || a.includes(k));
+      if (isAvail) continue;
+      const coreName = extractCoreIngredientName(line) || String(line).trim();
+      const existing = trackedMap.get(k);
+      if (existing) {
+        if (existing.status !== 'out') {
+          nextItems = upsertPantryItem(nextItems, { ...existing, status: 'out' });
+          addedCount += 1;
+        }
+      } else {
+        const created = normalizePantryItem({
+          id: generateId('pan'),
+          name: coreName,
+          category: 'other',
+          location: 'pantry',
+          status: 'out',
+        });
+        nextItems = upsertPantryItem(nextItems, created);
+        trackedMap.set(k, created);
+        addedCount += 1;
+      }
+    }
+
+    if (addedCount === 0) {
+      setNotice('warning', 'Missing ingredients are already flagged under Out / Restock.');
+      render();
+      return;
+    }
+
+    await persistPantryPatch(
+      { items: nextItems },
+      `Added ${addedCount} missing ingredient(s) from "${recipe.title}" to Pantry -> Out / Restock.`
+    );
+    return;
+  }
+
   if (action === 'add-editor-method') {
     const draft = readEditorFormIntoDraft();
     if (!draft) return;
@@ -1357,6 +1634,7 @@ async function handleAction(action, target) {
       recipes: snapshot.recipes,
       referenceData: snapshot.referenceData,
       mealPrepData: snapshot.mealPrepData,
+      pantryData: snapshot.pantryData,
     });
     setNotice('positive', 'Exported JSON backup.');
     render();
@@ -1540,7 +1818,8 @@ document.addEventListener('click', (event) => {
     action === 'toggle-save-immediately' ||
     action === 'toggle-timeline-recipe' ||
     action === 'set-timeline-scale' ||
-    action === 'set-timeline-method'
+    action === 'set-timeline-method' ||
+    action === 'toggle-matcher-staples'
   ) {
     return;
   }
@@ -1588,6 +1867,16 @@ document.addEventListener('input', (event) => {
   }
   if (target.id === 'mealprep-freezer-search') {
     state.freezerQuery = target.value;
+    render();
+    return;
+  }
+  if (target.id === 'pantry-search-input') {
+    state.pantryQuery = target.value;
+    render();
+    return;
+  }
+  if (target.id === 'matcher-ingredient-search') {
+    state.matcherSearch = target.value;
     render();
     return;
   }
@@ -1779,6 +2068,18 @@ document.addEventListener('change', async (event) => {
       const days = target.value === 'fridge' ? 4 : 90;
       bestByInput.value = new Date(baseMs + days * 86400000).toISOString().slice(0, 10);
     }
+    return;
+  }
+
+  if (target.id === 'pantry-category-select') {
+    state.pantryCategory = target.value || 'all';
+    render();
+    return;
+  }
+
+  if (target.dataset.action === 'toggle-matcher-staples') {
+    state.matcherIncludeStaples = Boolean(target.checked);
+    render();
   }
 });
 
@@ -2040,6 +2341,62 @@ document.addEventListener('submit', async (event) => {
       setNotice('danger', err?.message || 'Could not save batch prep plan.');
       render();
     }
+    return;
+  }
+
+  if (formId === 'pantry-item-form') {
+    event.preventDefault();
+    try {
+      const fd = new FormData(form);
+      const existingId = String(form.dataset.pantryId || '').trim();
+      const name = String(fd.get('name') || '').trim();
+      if (!name) {
+        setNotice('warning', 'Please enter an ingredient name.');
+        render();
+        return;
+      }
+      const candidate = normalizePantryItem({
+        id: existingId || generateId('pan'),
+        name,
+        category: fd.get('category'),
+        location: fd.get('location'),
+        quantity: fd.get('quantity'),
+        status: fd.get('status'),
+        alwaysStocked: fd.get('alwaysStocked') === 'on',
+        notes: fd.get('notes'),
+      });
+      const nextItems = upsertPantryItem(state.pantryData.items || [], candidate);
+      if (!existingId) {
+        state.pantryStatusFilter = 'all';
+        state.pantryCategory = 'all';
+        state.pantryQuery = '';
+      }
+      state.editingPantryId = null;
+      await persistPantryPatch(
+        { items: nextItems },
+        `Saved "${candidate.name}" to pantry.`
+      );
+    } catch (err) {
+      console.error('Pantry form save failed:', err);
+      setNotice('danger', err?.message || 'Could not save pantry item.');
+      render();
+    }
+    return;
+  }
+
+  if (formId === 'matcher-custom-form') {
+    event.preventDefault();
+    const fd = new FormData(form);
+    const raw = String(fd.get('customIngredient') || '').trim();
+    if (!raw) return;
+    const key = normalizeIngredientKey(raw);
+    const next = new Set(state.matcherSelectedNames);
+    const exists = Array.from(next).some((n) => normalizeIngredientKey(n) === key);
+    if (!exists && key) {
+      next.add(raw);
+    }
+    state.matcherSelectedNames = next;
+    render();
     return;
   }
 
