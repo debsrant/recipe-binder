@@ -11,6 +11,7 @@ export const PREF_KEYS = {
   fontScale: 'recipe-binder:fontScale',
   detailLayout: 'recipe-binder:detailLayout',
   printMethodsMode: 'recipe-binder:printMethodsMode',
+  unitMode: 'recipe-binder:unitMode',
 };
 
 export const RECIPE_PROXY_URL = (env.VITE_RECIPE_PROXY_URL || '').trim();

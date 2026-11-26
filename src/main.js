@@ -1,5 +1,6 @@
 import './style.css';
 import { APP_TITLE, IS_TEST_STAGE, PREF_KEYS, SITE_STAGE } from './config.js';
+import { FLAVOR_PAIRINGS } from './data/referenceGuide.js';
 import {
   applyMergedSnapshot,
   clearAllTestData,
@@ -48,6 +49,11 @@ import {
   generateId,
 } from './ui/helpers.js';
 import { renderImportView } from './ui/importView.js';
+import {
+  renderConverterResultHtml,
+  renderReferenceView,
+  renderTechniqueModal,
+} from './ui/referenceView.js';
 import { renderSyncView } from './ui/syncView.js';
 
 const THEMES = [
@@ -61,6 +67,13 @@ const FONT_SCALES = [
   { id: 'md', label: 'A' },
   { id: 'lg', label: 'A+' },
 ];
+
+const CONVERTER_MODE_DEFAULTS = {
+  'volume-weight': { fromUnit: 'cup', toUnit: 'g' },
+  volume: { fromUnit: 'cup', toUnit: 'tbsp' },
+  weight: { fromUnit: 'oz', toUnit: 'g' },
+  temperature: { fromUnit: 'f', toUnit: 'c' },
+};
 
 function readSavedPref(key, allowed, fallback) {
   try {
@@ -81,11 +94,12 @@ function savePref(key, value) {
 
 const state = {
   ready: false,
-  view: 'collection', // 'collection' | 'detail' | 'editor' | 'import' | 'dividers' | 'sync'
+  view: 'collection', // 'collection' | 'detail' | 'editor' | 'import' | 'reference' | 'dividers' | 'sync'
   theme: readSavedPref(PREF_KEYS.theme, ['parchment', 'slate', 'dusk'], 'parchment'),
   fontScale: readSavedPref(PREF_KEYS.fontScale, ['sm', 'md', 'lg'], 'md'),
   detailLayout: readSavedPref(PREF_KEYS.detailLayout, ['binder', 'classic'], 'binder'),
   printMethodsMode: readSavedPref(PREF_KEYS.printMethodsMode, ['selected', 'all'], 'selected'),
+  unitMode: readSavedPref(PREF_KEYS.unitMode, ['original', 'metric', 'us-weight'], 'original'),
   recipes: [],
   dividers: [],
   dividersUpdatedMs: 0,
@@ -100,6 +114,19 @@ const state = {
   sortBy: 'updated',
   scaleFactor: 1,
   activeMethodIndex: 0,
+  activeTechniqueId: null,
+  referenceTab: 'converter',
+  converter: {
+    mode: 'volume-weight',
+    value: '1',
+    fromUnit: 'cup',
+    toUnit: 'g',
+    ingredientId: 'ap-flour',
+  },
+  refChartQuery: '',
+  refTechniqueCategory: 'all',
+  refTechniqueQuery: '',
+  selectedFlavorId: 'rosemary',
   checkedIngredients: new Set(),
   checkedSteps: new Set(),
   wakeLockActive: false,
@@ -217,6 +244,7 @@ function renderNavBar() {
       <div class="nav-tab-list">
         <button type="button" class="nav-tab ${collectionActive ? 'is-active' : ''}" data-action="nav-view" data-view="collection">Collection</button>
         <button type="button" class="nav-tab ${state.view === 'import' ? 'is-active' : ''}" data-action="nav-view" data-view="import">Import</button>
+        <button type="button" class="nav-tab ${state.view === 'reference' ? 'is-active' : ''}" data-action="nav-view" data-view="reference">Reference</button>
         <button type="button" class="nav-tab ${state.view === 'dividers' ? 'is-active' : ''}" data-action="nav-view" data-view="dividers">Dividers</button>
         <button type="button" class="nav-tab ${state.view === 'sync' ? 'is-active' : ''}" data-action="nav-view" data-view="sync">Sync & Backup</button>
       </div>
@@ -245,6 +273,7 @@ function renderMainContent() {
       recipe,
       dividers: state.dividers,
       scaleFactor: state.scaleFactor,
+      unitMode: state.unitMode,
       checkedIngredients: state.checkedIngredients,
       checkedSteps: state.checkedSteps,
       wakeLockActive: state.wakeLockActive,
@@ -280,6 +309,17 @@ function renderMainContent() {
     });
   }
 
+  if (state.view === 'reference') {
+    return renderReferenceView({
+      activeTab: state.referenceTab,
+      converterState: state.converter,
+      chartQuery: state.refChartQuery,
+      techniqueCategory: state.refTechniqueCategory,
+      techniqueQuery: state.refTechniqueQuery,
+      selectedFlavorId: state.selectedFlavorId,
+    });
+  }
+
   if (state.view === 'dividers') {
     return renderDividersView({
       dividers: state.dividers,
@@ -308,15 +348,21 @@ function renderMainContent() {
   });
 }
 
+const PRESERVED_SEARCH_IDS = new Set([
+  'recipe-search-input',
+  'reference-chart-search',
+  'reference-technique-search',
+]);
+
 function render() {
   applyRootPreferences();
   const root = document.getElementById('app');
   if (!root) return;
 
   const activeEl = document.activeElement;
-  const preserveSearchFocus = activeEl && activeEl.id === 'recipe-search-input';
-  const selStart = preserveSearchFocus ? activeEl.selectionStart : null;
-  const selEnd = preserveSearchFocus ? activeEl.selectionEnd : null;
+  const focusId = activeEl && PRESERVED_SEARCH_IDS.has(activeEl.id) ? activeEl.id : '';
+  const selStart = focusId ? activeEl.selectionStart : null;
+  const selEnd = focusId ? activeEl.selectionEnd : null;
 
   root.innerHTML = `
     ${renderTopbar()}
@@ -325,10 +371,11 @@ function render() {
       ${renderNotice()}
       ${renderMainContent()}
     </main>
+    ${renderTechniqueModal(state.activeTechniqueId)}
   `;
 
-  if (preserveSearchFocus) {
-    const nextSearch = document.getElementById('recipe-search-input');
+  if (focusId) {
+    const nextSearch = document.getElementById(focusId);
     if (nextSearch) {
       nextSearch.focus();
       if (selStart !== null && selEnd !== null) {
@@ -614,6 +661,92 @@ async function handleAction(action, target) {
     state.printMethodsMode = nextMode;
     savePref(PREF_KEYS.printMethodsMode, nextMode);
     render();
+    return;
+  }
+
+  if (action === 'set-unit-mode') {
+    const allowed = ['original', 'metric', 'us-weight'];
+    const nextMode = allowed.includes(target.dataset.unitMode) ? target.dataset.unitMode : 'original';
+    state.unitMode = nextMode;
+    savePref(PREF_KEYS.unitMode, nextMode);
+    render();
+    return;
+  }
+
+  if (action === 'open-technique-modal') {
+    state.activeTechniqueId = target.dataset.techniqueId || null;
+    render();
+    return;
+  }
+
+  if (action === 'close-technique-modal') {
+    state.activeTechniqueId = null;
+    render();
+    return;
+  }
+
+  if (action === 'open-reference-techniques') {
+    state.activeTechniqueId = null;
+    if (state.view === 'detail') {
+      resetCookSession(true);
+    }
+    state.view = 'reference';
+    state.referenceTab = 'techniques';
+    render();
+    return;
+  }
+
+  if (action === 'select-ref-tab') {
+    state.referenceTab = target.dataset.refTab || 'converter';
+    render();
+    return;
+  }
+
+  if (action === 'set-converter-mode') {
+    const nextMode = target.dataset.mode || 'volume-weight';
+    const defaults = CONVERTER_MODE_DEFAULTS[nextMode] || CONVERTER_MODE_DEFAULTS['volume-weight'];
+    state.converter = {
+      ...state.converter,
+      mode: nextMode,
+      fromUnit: defaults.fromUnit,
+      toUnit: defaults.toUnit,
+    };
+    render();
+    return;
+  }
+
+  if (action === 'swap-converter-units') {
+    state.converter = {
+      ...state.converter,
+      fromUnit: state.converter.toUnit,
+      toUnit: state.converter.fromUnit,
+    };
+    render();
+    return;
+  }
+
+  if (action === 'select-technique-category') {
+    state.refTechniqueCategory = target.dataset.category || 'all';
+    render();
+    return;
+  }
+
+  if (action === 'select-flavor-family') {
+    const familyId = target.dataset.familyId || '';
+    const firstMatch = FLAVOR_PAIRINGS.find((p) => p.familyId === familyId);
+    if (firstMatch) {
+      state.selectedFlavorId = firstMatch.id;
+      render();
+    }
+    return;
+  }
+
+  if (action === 'select-flavor') {
+    const flavorId = target.dataset.flavorId || '';
+    if (flavorId) {
+      state.selectedFlavorId = flavorId;
+      render();
+    }
     return;
   }
 
@@ -1018,7 +1151,33 @@ document.addEventListener('click', (event) => {
   ) {
     return;
   }
+  if (
+    action === 'close-technique-modal' &&
+    actionEl.classList.contains('modal-backdrop') &&
+    event.target !== actionEl
+  ) {
+    return;
+  }
+  if (action === 'open-technique-modal') {
+    event.preventDefault();
+    event.stopPropagation();
+  }
   handleAction(action, actionEl);
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && state.activeTechniqueId) {
+    state.activeTechniqueId = null;
+    render();
+    return;
+  }
+  if (event.key === 'Enter' || event.key === ' ') {
+    const actionEl = event.target.closest?.('[data-action="select-flavor-family"]');
+    if (actionEl) {
+      event.preventDefault();
+      handleAction('select-flavor-family', actionEl);
+    }
+  }
 });
 
 document.addEventListener('input', (event) => {
@@ -1026,6 +1185,24 @@ document.addEventListener('input', (event) => {
   if (target.dataset.action === 'search-input') {
     state.searchQuery = target.value;
     render();
+    return;
+  }
+  if (target.id === 'reference-chart-search') {
+    state.refChartQuery = target.value;
+    render();
+    return;
+  }
+  if (target.id === 'reference-technique-search') {
+    state.refTechniqueQuery = target.value;
+    render();
+    return;
+  }
+  if (target.id === 'converter-value-input') {
+    state.converter = { ...state.converter, value: target.value };
+    const resultPanel = document.getElementById('converter-result-panel');
+    if (resultPanel) {
+      resultPanel.innerHTML = renderConverterResultHtml(state.converter);
+    }
     return;
   }
   if (target.id === 'scrape-url-input') {
@@ -1040,6 +1217,33 @@ document.addEventListener('input', (event) => {
 
 document.addEventListener('change', async (event) => {
   const target = event.target;
+
+  if (target.id === 'converter-from-select') {
+    state.converter = { ...state.converter, fromUnit: target.value };
+    const resultPanel = document.getElementById('converter-result-panel');
+    if (resultPanel) {
+      resultPanel.innerHTML = renderConverterResultHtml(state.converter);
+    }
+    return;
+  }
+
+  if (target.id === 'converter-to-select') {
+    state.converter = { ...state.converter, toUnit: target.value };
+    const resultPanel = document.getElementById('converter-result-panel');
+    if (resultPanel) {
+      resultPanel.innerHTML = renderConverterResultHtml(state.converter);
+    }
+    return;
+  }
+
+  if (target.id === 'converter-ingredient-select') {
+    state.converter = { ...state.converter, ingredientId: target.value };
+    const resultPanel = document.getElementById('converter-result-panel');
+    if (resultPanel) {
+      resultPanel.innerHTML = renderConverterResultHtml(state.converter);
+    }
+    return;
+  }
 
   if (target.dataset.action === 'sort-change') {
     state.sortBy = target.value || 'updated';

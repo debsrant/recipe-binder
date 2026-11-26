@@ -17,7 +17,7 @@ Grounded in `zed/recipe-binder-roadmap.md` ("The Modern Digital Kitchen Binder")
 
 ## Phase 2: Enhanced Core Recipe Management
 
-- [ ] **Volume <-> Weight Unit Converter:** One-tap toggle between Volume (`cups`/`tbsp`) and Weight (`grams`/`oz`) for baking ingredients.
+- [x] **Volume <-> Weight Unit Converter:** One-tap toggle between Volume (`cups`/`tbsp`) and Weight (`grams`/`oz`) for baking ingredients.
 - [ ] **Recipe Version History:** Preserve previous snapshots when tweaking a recipe over time so cooks can compare or revert.
 - [ ] **Frictionless Import Engine:**
   - Web URL clipper stripping blog filler into clean ingredients and steps.
@@ -33,11 +33,11 @@ Grounded in `zed/recipe-binder-roadmap.md` ("The Modern Digital Kitchen Binder")
 
 ---
 
-## Phase 4: Cooking Techniques & Reference Guide (The "Front Pocket")
+## Phase 4: Cooking Techniques & Reference Guide (The "Front Pocket") *(Implemented)*
 
-- [ ] **Interactive Reference Charts:** Internal meat temperatures, grain-to-water ratios, oil smoke points, and common ingredient substitutions.
-- [ ] **Technique Cards & In-Recipe Linking:** Short step-by-step reference cards (e.g., *Making a Roux*, *Velveting Chicken*) linked from highlighted keywords inside instructions.
-- [ ] **Flavor Pairing Wheel:** Built-in improvising guide when missing an herb or spice.
+- [x] **Interactive Reference Charts:** Internal meat temperatures, grain-to-water ratios, oil smoke points, and common ingredient substitutions.
+- [x] **Technique Cards & In-Recipe Linking:** Short step-by-step reference cards (e.g., *Making a Roux*, *Velveting Chicken*) linked from highlighted keywords inside instructions.
+- [x] **Flavor Pairing Wheel:** Built-in improvising guide when missing an herb or spice.
 
 ---
 

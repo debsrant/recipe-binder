@@ -1,14 +1,30 @@
 import { getRecipeMethods } from '../lib/collection.js';
-import { formatQuantity, scaleIngredientLine } from '../lib/scaling.js';
+import { formatQuantity } from '../lib/scaling.js';
+import { renderLinkedStepHtml } from '../lib/techniques.js';
+import { convertIngredientLine } from '../lib/units.js';
 import { escapeHtml, formatDateShort, formatMinutes } from './helpers.js';
 
 const SCALE_OPTIONS = [0.5, 1, 2, 3];
+const UNIT_MODES = [
+  { id: 'original', label: 'Original' },
+  { id: 'metric', label: 'g / ml' },
+  { id: 'us-weight', label: 'oz / lb' },
+];
 
 function renderScaleButtons(scaleFactor) {
   return SCALE_OPTIONS.map((factor) => {
     const label = `${factor}x`;
     const active = Number(scaleFactor) === factor;
     return `<button type="button" class="seg-btn ${active ? 'is-active' : ''}" data-action="set-scale" data-scale="${factor}">${label}</button>`;
+  }).join('');
+}
+
+function renderUnitModeButtons(unitMode) {
+  return UNIT_MODES.map((m) => {
+    const active = (unitMode || 'original') === m.id;
+    return `<button type="button" class="seg-btn ${active ? 'is-active' : ''}" data-action="set-unit-mode" data-unit-mode="${m.id}">${escapeHtml(
+      m.label
+    )}</button>`;
   }).join('');
 }
 
@@ -46,6 +62,7 @@ function renderClassicSheet({
   recipe,
   dividerName,
   scaleFactor,
+  unitMode,
   scaledServings,
   methods,
   activeMethodIndex,
@@ -71,7 +88,7 @@ function renderClassicSheet({
     ingredients.length > 0
       ? `<ul class="classic-ingredients-list ${twoColClass}">
           ${ingredients
-            .map((line) => `<li>${escapeHtml(scaleIngredientLine(line, scaleFactor))}</li>`)
+            .map((line) => `<li>${escapeHtml(convertIngredientLine(line, unitMode, scaleFactor))}</li>`)
             .join('')}
         </ul>`
       : '<p class="muted">No ingredients listed.</p>';
@@ -88,7 +105,7 @@ function renderClassicSheet({
             const stepsHtml =
               (method.steps || []).length > 0
                 ? `<ol class="classic-steps-list">
-                    ${method.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}
+                    ${method.steps.map((step) => `<li>${renderLinkedStepHtml(step, escapeHtml)}</li>`).join('')}
                   </ol>`
                 : '<p class="muted">No instructions listed.</p>';
             return `
@@ -116,7 +133,7 @@ function renderClassicSheet({
     const stepsListHtml =
       (activeMethod.steps || []).length > 0
         ? `<ol class="classic-steps-list">
-            ${activeMethod.steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('')}
+            ${activeMethod.steps.map((step) => `<li>${renderLinkedStepHtml(step, escapeHtml)}</li>`).join('')}
           </ol>`
         : '<p class="muted">No instructions listed.</p>';
 
@@ -197,6 +214,7 @@ export function renderDetailView({
   recipe,
   dividers,
   scaleFactor,
+  unitMode = 'original',
   checkedIngredients,
   checkedSteps,
   wakeLockActive,
@@ -227,6 +245,7 @@ export function renderDetailView({
   const scaledServings = formatQuantity((recipe.servings || 4) * scaleFactor) || String(recipe.servings || 4);
   const hasChecks = (checkedIngredients?.size || 0) > 0 || (checkedSteps?.size || 0) > 0;
   const scaleButtonsHtml = renderScaleButtons(scaleFactor);
+  const unitButtonsHtml = renderUnitModeButtons(unitMode);
   const isClassic = detailLayout === 'classic';
   const methodTabsHtml = renderMethodTabsBar(methods, methodIdx);
 
@@ -307,6 +326,7 @@ export function renderDetailView({
           recipe,
           dividerName,
           scaleFactor,
+          unitMode,
           scaledServings,
           methods,
           activeMethodIndex: methodIdx,
@@ -317,6 +337,7 @@ export function renderDetailView({
           recipe,
           dividerName,
           scaleFactor,
+          unitMode,
           scaledServings,
           methods,
           activeMethodIndex: methodIdx,
@@ -328,6 +349,7 @@ export function renderDetailView({
           recipe,
           dividerName,
           scaleFactor,
+          unitMode,
           scaledServings,
           methods,
           activeMethodIndex: methodIdx,
@@ -340,11 +362,14 @@ export function renderDetailView({
         ${actionBarHtml}
         ${methodTabsHtml}
         <div class="classic-scale-bar no-print">
-          <span class="classic-scale-label">Scale Batch:</span>
+          <span class="classic-scale-label">Scale:</span>
           <div class="seg-control" role="group" aria-label="Scale recipe">
             ${scaleButtonsHtml}
           </div>
-          <span class="muted classic-scale-hint">Formatted for traditional cookbook reading &amp; printing</span>
+          <span class="classic-scale-label">Units:</span>
+          <div class="seg-control" role="group" aria-label="Convert ingredient units">
+            ${unitButtonsHtml}
+          </div>
         </div>
         ${classicBodyHtml}
       </section>
@@ -355,7 +380,7 @@ export function renderDetailView({
     (recipe.ingredients || []).length > 0
       ? recipe.ingredients
           .map((line, index) => {
-            const scaled = scaleIngredientLine(line, scaleFactor);
+            const converted = convertIngredientLine(line, unitMode, scaleFactor);
             const checked = checkedIngredients?.has(index);
             return `<li class="check-item ${checked ? 'is-checked' : ''}">
               <label class="check-label">
@@ -365,7 +390,7 @@ export function renderDetailView({
                   data-index="${index}"
                   ${checked ? 'checked' : ''}
                 />
-                <span>${escapeHtml(scaled)}</span>
+                <span>${escapeHtml(converted)}</span>
               </label>
             </li>`;
           })
@@ -387,7 +412,7 @@ export function renderDetailView({
                   ${checked ? 'checked' : ''}
                 />
                 <span class="step-num">${index + 1}.</span>
-                <span class="step-text">${escapeHtml(step)}</span>
+                <span class="step-text">${renderLinkedStepHtml(step, escapeHtml)}</span>
               </label>
             </li>`;
           })
@@ -413,6 +438,7 @@ export function renderDetailView({
     recipe,
     dividerName,
     scaleFactor,
+    unitMode,
     scaledServings,
     methods,
     activeMethodIndex: methodIdx,
@@ -487,6 +513,12 @@ export function renderDetailView({
                     ? '<button type="button" class="btn btn-sm btn-secondary" data-action="reset-checks">Reset Checks</button>'
                     : ''
                 }
+              </div>
+              <div class="unit-toggle-row">
+                <span class="classic-scale-label">Units:</span>
+                <div class="seg-control" role="group" aria-label="Convert ingredient units">
+                  ${unitButtonsHtml}
+                </div>
               </div>
               <ul class="ingredient-list">
                 ${ingredientsHtml}

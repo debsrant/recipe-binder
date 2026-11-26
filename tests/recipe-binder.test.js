@@ -30,6 +30,22 @@ import {
 } from '../src/lib/recipeImport.js';
 import { validateRecipeUrl } from '../src/lib/webScraper.js';
 import { createZipBytes } from '../src/lib/zip.js';
+import {
+  FLAVOR_FAMILIES,
+  FLAVOR_PAIRINGS,
+  GRAIN_RATIOS,
+  MEAT_TEMPERATURES,
+  OIL_SMOKE_POINTS,
+  SUBSTITUTIONS,
+  TECHNIQUE_CARDS,
+} from '../src/data/referenceGuide.js';
+import { findMatchingTechniques, renderLinkedStepHtml } from '../src/lib/techniques.js';
+import {
+  convertIngredientLine,
+  convertMeasurement,
+  findIngredientDensity,
+  getQuickEquivalents,
+} from '../src/lib/units.js';
 
 test('parseQuantityToken handles integers, decimals, slash fractions, mixed numbers, and Unicode', () => {
   assert.equal(parseQuantityToken('2'), 2);
@@ -752,4 +768,113 @@ test('collectMethods aggregates unique method counts and filterAndSortRecipes fi
     filterAndSortRecipes(recipes, { method: 'Slow Cooker' }).map((r) => r.id),
     ['r1', 'r2']
   );
+});
+
+test('convertMeasurement handles volume, weight, temperature, fractions, and ingredient density conversions', () => {
+  const flourToGrams = convertMeasurement({
+    value: '1 1/2',
+    fromUnit: 'cup',
+    toUnit: 'g',
+    ingredientId: 'ap-flour',
+  });
+  assert.equal(flourToGrams.ok, true);
+  assert.equal(flourToGrams.formatted, '180');
+
+  const butterToCups = convertMeasurement({
+    value: 227,
+    fromUnit: 'g',
+    toUnit: 'cup',
+    ingredientId: 'butter',
+  });
+  assert.equal(butterToCups.ok, true);
+  assert.equal(butterToCups.formatted, '1');
+
+  const volRes = convertMeasurement({ value: '1/2', fromUnit: 'cup', toUnit: 'tbsp' });
+  assert.equal(volRes.ok, true);
+  assert.equal(volRes.formatted, '8');
+
+  const weightRes = convertMeasurement({ value: 1, fromUnit: 'lb', toUnit: 'g' });
+  assert.equal(weightRes.ok, true);
+  assert.equal(weightRes.formatted, '454');
+
+  const tempRes = convertMeasurement({ value: 350, fromUnit: 'f', toUnit: 'c' });
+  assert.equal(tempRes.ok, true);
+  assert.equal(tempRes.formatted, '177');
+
+  const missingDensity = convertMeasurement({ value: 1, fromUnit: 'cup', toUnit: 'g' });
+  assert.equal(missingDensity.ok, false);
+
+  const equivs = getQuickEquivalents('1', 'cup', 'ap-flour');
+  assert.ok(equivs.some((e) => e.value === '16 tbsp'));
+  assert.ok(equivs.some((e) => e.value === '120 g'));
+  assert.equal(findIngredientDensity('2 1/4 cups all-purpose flour')?.id, 'ap-flour');
+});
+
+test('convertIngredientLine converts scaled recipes to metric and us-weight safely', () => {
+  assert.equal(
+    convertIngredientLine('1 1/2 cups all-purpose flour', 'original', 2),
+    '3 cups all-purpose flour'
+  );
+  assert.equal(
+    convertIngredientLine('1 cup all-purpose flour', 'metric', 1),
+    '120 g all-purpose flour'
+  );
+  assert.equal(
+    convertIngredientLine('1/2 cup unsalted butter', 'metric', 2),
+    '227 g unsalted butter'
+  );
+  assert.equal(
+    convertIngredientLine('1 1/2 lb boneless skinless chicken thighs', 'metric', 1),
+    '680 g boneless skinless chicken thighs'
+  );
+  assert.equal(
+    convertIngredientLine('1 cup all-purpose flour', 'us-weight', 1),
+    '4.23 oz all-purpose flour'
+  );
+  assert.equal(
+    convertIngredientLine('2 large eggs, room temperature', 'metric', 1),
+    '2 large eggs, room temperature'
+  );
+  assert.equal(
+    convertIngredientLine('2-3 cloves garlic, minced', 'metric', 1),
+    '2-3 cloves garlic, minced'
+  );
+});
+
+test('findMatchingTechniques and renderLinkedStepHtml link culinary keywords safely', () => {
+  const step = 'Sear the chicken until golden, then deglaze with broth & <script>alert(1)</script> simmer 3 minutes.';
+  const matches = findMatchingTechniques(step);
+  assert.ok(matches.some((m) => m.techniqueId === 'searing'));
+  assert.ok(matches.some((m) => m.techniqueId === 'deglazing'));
+  assert.ok(matches.some((m) => m.techniqueId === 'simmer-reduce'));
+
+  const esc = (v) =>
+    String(v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  const html = renderLinkedStepHtml(step, esc);
+  assert.ok(html.includes('data-action="open-technique-modal"'));
+  assert.ok(html.includes('data-technique-id="deglazing"'));
+  assert.ok(!html.includes('<script>'));
+  assert.ok(html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
+});
+
+test('referenceGuide datasets are populated with valid flavor pairing cross-references', () => {
+  assert.ok(MEAT_TEMPERATURES.length >= 10);
+  assert.ok(GRAIN_RATIOS.length >= 10);
+  assert.ok(OIL_SMOKE_POINTS.length >= 8);
+  assert.ok(SUBSTITUTIONS.length >= 12);
+  assert.ok(TECHNIQUE_CARDS.length >= 10);
+  assert.equal(FLAVOR_FAMILIES.length, 5);
+
+  const familyIds = new Set(FLAVOR_FAMILIES.map((f) => f.id));
+  const flavorIds = new Set(FLAVOR_PAIRINGS.map((p) => p.id));
+  for (const item of FLAVOR_PAIRINGS) {
+    assert.ok(familyIds.has(item.familyId));
+    for (const paired of item.pairsWellWith) {
+      assert.ok(flavorIds.has(paired), `Unknown pairing ${paired} on ${item.id}`);
+    }
+  }
 });
