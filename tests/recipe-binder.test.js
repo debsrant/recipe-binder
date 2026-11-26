@@ -39,6 +39,17 @@ import {
   SUBSTITUTIONS,
   TECHNIQUE_CARDS,
 } from '../src/data/referenceGuide.js';
+import {
+  deleteFlavorItem,
+  deleteReferenceItem,
+  getDefaultReferenceData,
+  mergeReferenceData,
+  normalizeFlavor,
+  normalizeReferenceData,
+  normalizeSubstitution,
+  normalizeTechnique,
+  upsertReferenceItem,
+} from '../src/lib/reference.js';
 import { findMatchingTechniques, renderLinkedStepHtml } from '../src/lib/techniques.js';
 import {
   convertIngredientLine,
@@ -877,4 +888,65 @@ test('referenceGuide datasets are populated with valid flavor pairing cross-refe
       assert.ok(flavorIds.has(paired), `Unknown pairing ${paired} on ${item.id}`);
     }
   }
+});
+
+test('referenceData includes spice substitutions and supports upsert, delete, prune, and merge', () => {
+  const defaults = getDefaultReferenceData();
+  assert.ok(defaults.substitutions.some((s) => s.category === 'Spices & Herbs' && s.missing.includes('Cumin')));
+  assert.ok(defaults.substitutions.some((s) => s.category === 'Spices & Herbs' && s.missing.includes('Cinnamon')));
+
+  const customSub = normalizeSubstitution({
+    missing: 'Sumac',
+    category: 'Spices & Herbs',
+    amount: '1 tsp',
+    substitute: '1 tsp lemon zest + pinch salt',
+  });
+  const updatedSubs = upsertReferenceItem(defaults.substitutions, customSub);
+  assert.equal(updatedSubs.length, defaults.substitutions.length + 1);
+  assert.equal(deleteReferenceItem(updatedSubs, customSub.id).length, defaults.substitutions.length);
+
+  // Deleting a flavor prunes dangling references from other flavors' pairsWellWith
+  const pruned = deleteFlavorItem(defaults.flavors, 'garlic');
+  assert.equal(pruned.some((f) => f.id === 'garlic'), false);
+  assert.equal(pruned.some((f) => f.pairsWellWith.includes('garlic')), false);
+
+  // normalizeReferenceData preserves intentional empty arrays
+  const emptyNorm = normalizeReferenceData({ substitutions: [], techniques: [], flavors: [], updatedMs: 500 });
+  assert.equal(emptyNorm.substitutions.length, 0);
+  assert.equal(emptyNorm.techniques.length, 0);
+  assert.equal(emptyNorm.flavors.length, 0);
+
+  // mergeReferenceData picks newer updatedMs, and mergeCollectionSnapshots propagates it
+  const mergedRef = mergeReferenceData(
+    { ...defaults, updatedMs: 100 },
+    { ...defaults, substitutions: updatedSubs, updatedMs: 900 }
+  );
+  assert.equal(mergedRef.substitutions.length, updatedSubs.length);
+
+  const mergedSnap = mergeCollectionSnapshots(
+    { dividers: [], recipes: [], referenceData: { ...defaults, updatedMs: 100 } },
+    { dividers: [], recipes: [], referenceData: { ...defaults, substitutions: updatedSubs, updatedMs: 900 } }
+  );
+  assert.equal(mergedSnap.referenceData.substitutions.length, updatedSubs.length);
+
+  // Custom user-added technique auto-links inside recipe steps
+  const customTech = normalizeTechnique({
+    title: 'Blooming Spices',
+    category: 'Heat & Sauces',
+    keywords: ['bloom the spices'],
+    steps: ['Warm spices in oil 30 seconds.'],
+  });
+  const customHtml = renderLinkedStepHtml('First bloom the spices in hot oil.', (s) => s, [
+    ...defaults.techniques,
+    customTech,
+  ]);
+  assert.ok(customHtml.includes(`data-technique-id="${customTech.id}"`));
+
+  const customFlavor = normalizeFlavor({
+    name: 'Tarragon',
+    familyId: 'fresh-herbs',
+    bestWith: ['Chicken', 'Eggs'],
+  });
+  assert.equal(customFlavor.id, 'tarragon');
+  assert.deepEqual(customFlavor.bestWith, ['Chicken', 'Eggs']);
 });

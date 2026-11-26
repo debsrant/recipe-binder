@@ -1,3 +1,5 @@
+import { mergeReferenceData } from './reference.js';
+
 /**
  * Normalizes a single tag into lowercase kebab-case without leading hashes.
  */
@@ -301,9 +303,16 @@ export function mergeCollectionSnapshots(localSnapshot, remoteSnapshot) {
     }
   }
 
-  return {
+  const merged = {
     dividers: mergedDividers,
     dividersUpdatedMs,
     recipes: Array.from(recipeMap.values()),
   };
+  if (localSnapshot?.referenceData || remoteSnapshot?.referenceData) {
+    merged.referenceData = mergeReferenceData(
+      localSnapshot?.referenceData,
+      remoteSnapshot?.referenceData
+    );
+  }
+  return merged;
 }

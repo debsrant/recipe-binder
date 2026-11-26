@@ -39,21 +39,59 @@ export const OIL_SMOKE_POINTS = [
   { oil: 'Walnut / Flaxseed Oil', smokeF: '225–320°F', smokeC: '107–160°C', bestFor: 'Cold dressings and finishing only', flavor: 'Delicate nutty' },
 ];
 
+export const SUBSTITUTION_CATEGORIES = [
+  'all',
+  'Spices & Herbs',
+  'Baking & Dairy',
+  'Pantry & Liquids',
+  'Produce & Aromatics',
+  'Other',
+];
+
 export const SUBSTITUTIONS = [
-  { missing: 'Buttermilk', amount: '1 cup', substitute: '1 tbsp lemon juice or white vinegar + milk to make 1 cup', notes: 'Stir and rest 5–10 min until slightly curdled' },
-  { missing: 'Cake Flour', amount: '1 cup', substitute: '1 cup all-purpose flour minus 2 tbsp, plus 2 tbsp cornstarch', notes: 'Whisk or sift twice for tender crumb' },
-  { missing: 'Brown Sugar', amount: '1 cup', substitute: '1 cup granulated sugar + 1–2 tbsp molasses', notes: '1 tbsp for light, 2 tbsp for dark brown sugar' },
-  { missing: 'Baking Powder', amount: '1 tsp', substitute: '1/4 tsp baking soda + 1/2 tsp cream of tartar', notes: 'Use immediately once mixed into wet batter' },
-  { missing: 'Heavy Cream (for cooking)', amount: '1 cup', substitute: '3/4 cup whole milk + 1/4 cup melted unsalted butter', notes: 'Works for sauces/soups; does not whip into stiff peaks' },
-  { missing: 'Sour Cream', amount: '1 cup', substitute: '1 cup plain full-fat Greek yogurt', notes: '1:1 swap in baking, dips, and toppings' },
-  { missing: 'Egg (in baking)', amount: '1 large egg', substitute: '1 tbsp ground flaxseed + 3 tbsp warm water (rest 5 min)', notes: 'Or 1/4 cup unsweetened applesauce / mashed banana' },
-  { missing: 'Cornstarch (thickener)', amount: '1 tbsp', substitute: '2 tbsp all-purpose flour (or 1 tbsp arrowroot)', notes: 'Whisk flour into cold liquid before simmering' },
-  { missing: 'Fresh Herbs', amount: '1 tbsp chopped', substitute: '1 tsp dried herbs', notes: '3:1 fresh-to-dried ratio; add dried earlier in cooking' },
-  { missing: 'Fresh Garlic', amount: '1 clove', substitute: '1/8 tsp garlic powder (or 1/2 tsp minced jarred)', notes: 'Use powder in rubs/sauces; fresh for sautéing' },
-  { missing: 'Lemon Juice', amount: '1 tbsp', substitute: '1 tbsp lime juice or 1/2 tbsp white wine vinegar', notes: 'Balances richness similarly with bright acid' },
-  { missing: 'Soy Sauce', amount: '1 tbsp', substitute: '1 tbsp tamari (GF) or 1 tbsp coconut aminos + pinch salt', notes: 'Coconut aminos is slightly sweeter' },
-  { missing: 'Dry White Wine (deglazing)', amount: '1/2 cup', substitute: '1/2 cup chicken/veg broth + 1 tsp lemon juice or vinegar', notes: 'Keeps acidity without alcohol' },
-  { missing: 'Breadcrumbs', amount: '1 cup', substitute: '1 cup crushed crackers, panko, or rolled oats', notes: 'Toast oats briefly if using as a crunchy topping' },
+  // Baking & Dairy
+  { id: 'sub-buttermilk', category: 'Baking & Dairy', missing: 'Buttermilk', amount: '1 cup', substitute: '1 tbsp lemon juice or white vinegar + milk to make 1 cup', notes: 'Stir and rest 5–10 min until slightly curdled' },
+  { id: 'sub-cake-flour', category: 'Baking & Dairy', missing: 'Cake Flour', amount: '1 cup', substitute: '1 cup all-purpose flour minus 2 tbsp, plus 2 tbsp cornstarch', notes: 'Whisk or sift twice for tender crumb' },
+  { id: 'sub-brown-sugar', category: 'Baking & Dairy', missing: 'Brown Sugar', amount: '1 cup', substitute: '1 cup granulated sugar + 1–2 tbsp molasses', notes: '1 tbsp for light, 2 tbsp for dark brown sugar' },
+  { id: 'sub-baking-powder', category: 'Baking & Dairy', missing: 'Baking Powder', amount: '1 tsp', substitute: '1/4 tsp baking soda + 1/2 tsp cream of tartar', notes: 'Use immediately once mixed into wet batter' },
+  { id: 'sub-heavy-cream', category: 'Baking & Dairy', missing: 'Heavy Cream (for cooking)', amount: '1 cup', substitute: '3/4 cup whole milk + 1/4 cup melted unsalted butter', notes: 'Works for sauces/soups; does not whip into stiff peaks' },
+  { id: 'sub-sour-cream', category: 'Baking & Dairy', missing: 'Sour Cream', amount: '1 cup', substitute: '1 cup plain full-fat Greek yogurt', notes: '1:1 swap in baking, dips, and toppings' },
+  { id: 'sub-egg-baking', category: 'Baking & Dairy', missing: 'Egg (in baking)', amount: '1 large egg', substitute: '1 tbsp ground flaxseed + 3 tbsp warm water (rest 5 min)', notes: 'Or 1/4 cup unsweetened applesauce / mashed banana' },
+  { id: 'sub-cornstarch', category: 'Baking & Dairy', missing: 'Cornstarch (thickener)', amount: '1 tbsp', substitute: '2 tbsp all-purpose flour (or 1 tbsp arrowroot)', notes: 'Whisk flour into cold liquid before simmering' },
+
+  // Pantry & Liquids
+  { id: 'sub-lemon-juice', category: 'Pantry & Liquids', missing: 'Lemon Juice', amount: '1 tbsp', substitute: '1 tbsp lime juice or 1/2 tbsp white wine vinegar', notes: 'Balances richness similarly with bright acid' },
+  { id: 'sub-soy-sauce', category: 'Pantry & Liquids', missing: 'Soy Sauce', amount: '1 tbsp', substitute: '1 tbsp tamari (GF) or 1 tbsp coconut aminos + pinch salt', notes: 'Coconut aminos is slightly sweeter' },
+  { id: 'sub-white-wine', category: 'Pantry & Liquids', missing: 'Dry White Wine (deglazing)', amount: '1/2 cup', substitute: '1/2 cup chicken/veg broth + 1 tsp lemon juice or vinegar', notes: 'Keeps acidity without alcohol' },
+  { id: 'sub-breadcrumbs', category: 'Pantry & Liquids', missing: 'Breadcrumbs', amount: '1 cup', substitute: '1 cup crushed crackers, panko, or rolled oats', notes: 'Toast oats briefly if using as a crunchy topping' },
+  { id: 'sub-garlic', category: 'Produce & Aromatics', missing: 'Fresh Garlic', amount: '1 clove', substitute: '1/8 tsp garlic powder (or 1/2 tsp minced jarred)', notes: 'Use powder in rubs/sauces; fresh for sautéing' },
+
+  // Spices & Herbs
+  { id: 'sub-fresh-dried-herbs', category: 'Spices & Herbs', missing: 'Fresh Herbs (General)', amount: '1 tbsp chopped', substitute: '1 tsp dried herbs', notes: '3:1 fresh-to-dried ratio; add dried earlier in cooking' },
+  { id: 'sub-allspice', category: 'Spices & Herbs', missing: 'Allspice', amount: '1 tsp', substitute: '1/2 tsp cinnamon + 1/4 tsp nutmeg + 1/4 tsp cloves', notes: 'Great in Jamaican jerk, stews, and spiced cakes' },
+  { id: 'sub-cajun-seasoning', category: 'Spices & Herbs', missing: 'Cajun / Creole Seasoning', amount: '1 tbsp', substitute: '1 tsp paprika + 1 tsp garlic powder + 1/2 tsp oregano + 1/2 tsp thyme + 1/4 tsp cayenne + pinch black pepper', notes: 'Add kosher salt to taste depending on recipe' },
+  { id: 'sub-cardamom', category: 'Spices & Herbs', missing: 'Cardamom (Ground)', amount: '1 tsp', substitute: '1/2 tsp ground cinnamon + 1/2 tsp ground nutmeg (plus pinch ginger)', notes: 'Captures warm floral spice in baking & curries' },
+  { id: 'sub-cayenne', category: 'Spices & Herbs', missing: 'Cayenne Pepper', amount: '1/4 tsp', substitute: '1/4 tsp crushed red pepper flakes or 1/2 tsp hot paprika', notes: 'Or a few dashes of hot sauce (reduce salt slightly)' },
+  { id: 'sub-chili-powder', category: 'Spices & Herbs', missing: 'Chili Powder (American Blend)', amount: '1 tbsp', substitute: '2 tsp paprika + 1 tsp cumin + 1/2 tsp garlic powder + 1/2 tsp oregano + pinch cayenne', notes: 'Pure ancho/pasilla chile powder is milder and fruitier' },
+  { id: 'sub-cinnamon', category: 'Spices & Herbs', missing: 'Cinnamon', amount: '1 tsp', substitute: '1/2 tsp nutmeg or 1/2 tsp allspice (or pumpkin pie spice 1:1)', notes: 'Use half amount of nutmeg/allspice so it does not overpower' },
+  { id: 'sub-cloves', category: 'Spices & Herbs', missing: 'Cloves (Ground)', amount: '1/2 tsp', substitute: '1/2 tsp allspice or 1/2 tsp nutmeg + pinch cinnamon', notes: '4 whole cloves ≈ 1/4 tsp ground' },
+  { id: 'sub-coriander', category: 'Spices & Herbs', missing: 'Coriander (Ground)', amount: '1 tsp', substitute: '1 tsp cumin (or 3/4 tsp cumin + 1/4 tsp lemon zest)', notes: 'Caraway seed also mirrors coriander in breads & cabbage' },
+  { id: 'sub-cumin', category: 'Spices & Herbs', missing: 'Cumin (Ground)', amount: '1 tsp', substitute: '1/2 tsp chili powder + 1/2 tsp ground coriander', notes: 'Or use taco seasoning 1.5x (reduce added salt)' },
+  { id: 'sub-curry-powder', category: 'Spices & Herbs', missing: 'Curry Powder', amount: '1 tbsp', substitute: '1 tsp turmeric + 1 tsp cumin + 1/2 tsp coriander + 1/2 tsp ginger + pinch cayenne', notes: 'Toast gently in oil 30 seconds for full aroma' },
+  { id: 'sub-five-spice', category: 'Spices & Herbs', missing: 'Chinese Five-Spice', amount: '1 tsp', substitute: '1/4 tsp each cinnamon, cloves, fennel seed, black pepper + pinch star anise', notes: 'Or equal parts garam masala + pinch crushed fennel' },
+  { id: 'sub-garam-masala', category: 'Spices & Herbs', missing: 'Garam Masala', amount: '1 tsp', substitute: '3/4 tsp curry powder + 1/4 tsp cinnamon (plus pinch cumin)', notes: 'Stir in near the end of cooking for bright warmth' },
+  { id: 'sub-ginger', category: 'Spices & Herbs', missing: 'Fresh Ginger (Grated)', amount: '1 tbsp', substitute: '1/4 tsp ground dried ginger', notes: 'Fresh is brighter in stir-fries; ground is warmer in baking' },
+  { id: 'sub-italian-seasoning', category: 'Spices & Herbs', missing: 'Italian Seasoning', amount: '1 tbsp', substitute: '1 tsp dried oregano + 1 tsp dried basil + 1/2 tsp thyme + 1/2 tsp rosemary', notes: 'Crush dried rosemary slightly between fingers first' },
+  { id: 'sub-nutmeg', category: 'Spices & Herbs', missing: 'Nutmeg', amount: '1/2 tsp', substitute: '1/2 tsp ground mace or 1/2 tsp allspice', notes: 'In cream sauces, white pepper + pinch cinnamon also works' },
+  { id: 'sub-oregano', category: 'Spices & Herbs', missing: 'Oregano (Dried)', amount: '1 tsp', substitute: '1 tsp dried marjoram or 1 tsp dried thyme', notes: 'Marjoram is slightly sweeter and gentler than oregano' },
+  { id: 'sub-paprika', category: 'Spices & Herbs', missing: 'Smoked Paprika', amount: '1 tsp', substitute: '1 tsp sweet paprika + tiny drop liquid smoke (or 1/2 tsp chipotle powder)', notes: 'Chipotle adds heat as well as smoke' },
+  { id: 'sub-poultry-seasoning', category: 'Spices & Herbs', missing: 'Poultry Seasoning', amount: '1 tsp', substitute: '1/2 tsp dried sage + 1/4 tsp thyme + 1/4 tsp marjoram/rosemary', notes: 'Classic roast chicken, stuffing, and gravy blend' },
+  { id: 'sub-pumpkin-spice', category: 'Spices & Herbs', missing: 'Pumpkin Pie Spice', amount: '1 tbsp', substitute: '1 1/2 tsp cinnamon + 1 tsp ginger + 1/2 tsp nutmeg + 1/4 tsp allspice/cloves', notes: 'Works 1:1 in pies, pancakes, and oatmeal' },
+  { id: 'sub-rosemary', category: 'Spices & Herbs', missing: 'Rosemary', amount: '1 tsp dried (or 1 tbsp fresh)', substitute: 'Same amount thyme or savory', notes: 'Use half as much sage if substituting for rosemary' },
+  { id: 'sub-saffron', category: 'Spices & Herbs', missing: 'Saffron Threads', amount: '1/4 tsp', substitute: '1/4 tsp turmeric (for color) + pinch paprika', notes: 'Turmeric replicates golden color; add a dash of honey for floral note' },
+  { id: 'sub-sage', category: 'Spices & Herbs', missing: 'Sage (Rubbed / Dried)', amount: '1 tsp', substitute: '1 tsp marjoram, thyme, or poultry seasoning', notes: 'Ideal for pork, squash, and brown-butter sauces' },
+  { id: 'sub-thyme', category: 'Spices & Herbs', missing: 'Thyme (Dried)', amount: '1 tsp', substitute: '1 tsp Italian seasoning or 3/4 tsp dried oregano', notes: '1 sprig fresh thyme ≈ 1/2 tsp dried leaves' },
+  { id: 'sub-turmeric', category: 'Spices & Herbs', missing: 'Turmeric (Ground)', amount: '1 tsp', substitute: '1 tsp yellow curry powder or 1/2 tsp dry mustard + pinch paprika', notes: 'Curry powder adds cumin/coriander notes alongside golden color' },
 ];
 
 export const TECHNIQUE_CARDS = [

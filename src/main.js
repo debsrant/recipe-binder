@@ -1,6 +1,5 @@
 import './style.css';
 import { APP_TITLE, IS_TEST_STAGE, PREF_KEYS, SITE_STAGE } from './config.js';
-import { FLAVOR_PAIRINGS } from './data/referenceGuide.js';
 import {
   applyMergedSnapshot,
   clearAllTestData,
@@ -11,6 +10,7 @@ import {
   resetToSeedData,
   saveDividers,
   saveRecipe,
+  saveReferenceData,
   softDeleteRecipe,
   toggleFavorite,
 } from './db/database.js';
@@ -23,6 +23,15 @@ import {
 } from './lib/collection.js';
 import { recipeToFilename, recipeToMarkdown, slugifyFilename } from './lib/markdown.js';
 import { parseImportedContent, parseTextRecipe } from './lib/recipeImport.js';
+import {
+  deleteFlavorItem,
+  deleteReferenceItem,
+  getDefaultReferenceData,
+  normalizeFlavor,
+  normalizeSubstitution,
+  normalizeTechnique,
+  upsertReferenceItem,
+} from './lib/reference.js';
 import { fetchAndScrapeRecipeUrl } from './lib/webScraper.js';
 import { createZipBlob } from './lib/zip.js';
 import {
@@ -31,6 +40,7 @@ import {
   initCloudSync,
   pushDividersToCloud,
   pushRecipeToCloud,
+  pushReferenceDataToCloud,
   signInWithEmail,
   signInWithGoogle,
   signOutCloud,
@@ -103,6 +113,7 @@ const state = {
   recipes: [],
   dividers: [],
   dividersUpdatedMs: 0,
+  referenceData: getDefaultReferenceData(),
   selectedRecipeId: null,
   editingRecipeId: null,
   draftRecipe: null,
@@ -123,10 +134,15 @@ const state = {
     toUnit: 'g',
     ingredientId: 'ap-flour',
   },
+  refSubCategory: 'all',
+  refSubQuery: '',
+  editingSubId: null,
   refChartQuery: '',
   refTechniqueCategory: 'all',
   refTechniqueQuery: '',
+  editingTechniqueId: null,
   selectedFlavorId: 'rosemary',
+  editingFlavorId: null,
   checkedIngredients: new Set(),
   checkedSteps: new Set(),
   wakeLockActive: false,
@@ -281,6 +297,7 @@ function renderMainContent() {
       detailLayout: state.detailLayout,
       activeMethodIndex: state.activeMethodIndex,
       printMethodsMode: state.printMethodsMode,
+      techniques: state.referenceData.techniques,
     });
   }
 
@@ -312,11 +329,17 @@ function renderMainContent() {
   if (state.view === 'reference') {
     return renderReferenceView({
       activeTab: state.referenceTab,
+      referenceData: state.referenceData,
       converterState: state.converter,
+      subCategory: state.refSubCategory,
+      subQuery: state.refSubQuery,
+      editingSubId: state.editingSubId,
       chartQuery: state.refChartQuery,
       techniqueCategory: state.refTechniqueCategory,
       techniqueQuery: state.refTechniqueQuery,
+      editingTechniqueId: state.editingTechniqueId,
       selectedFlavorId: state.selectedFlavorId,
+      editingFlavorId: state.editingFlavorId,
     });
   }
 
@@ -350,6 +373,7 @@ function renderMainContent() {
 
 const PRESERVED_SEARCH_IDS = new Set([
   'recipe-search-input',
+  'reference-sub-search',
   'reference-chart-search',
   'reference-technique-search',
 ]);
@@ -371,7 +395,7 @@ function render() {
       ${renderNotice()}
       ${renderMainContent()}
     </main>
-    ${renderTechniqueModal(state.activeTechniqueId)}
+    ${renderTechniqueModal(state.activeTechniqueId, state.referenceData.techniques)}
   `;
 
   if (focusId) {
@@ -389,12 +413,26 @@ function applySnapshotToState(snapshot) {
   state.recipes = snapshot.recipes || [];
   state.dividers = snapshot.dividers || [];
   state.dividersUpdatedMs = Number(snapshot.dividersUpdatedMs || 0);
+  state.referenceData = snapshot.referenceData || getDefaultReferenceData();
   if (
     state.activeDividerId !== 'all' &&
     !state.dividers.some((d) => d.id === state.activeDividerId)
   ) {
     state.activeDividerId = 'all';
   }
+}
+
+async function persistReferencePatch(patch, noticeMsg) {
+  const saved = await saveReferenceData({
+    ...state.referenceData,
+    ...patch,
+  });
+  state.referenceData = saved;
+  await pushReferenceDataToCloud(saved);
+  if (noticeMsg) {
+    setNotice('positive', noticeMsg);
+  }
+  render();
 }
 
 function resetCookSession(releaseLock = true) {
@@ -733,7 +771,7 @@ async function handleAction(action, target) {
 
   if (action === 'select-flavor-family') {
     const familyId = target.dataset.familyId || '';
-    const firstMatch = FLAVOR_PAIRINGS.find((p) => p.familyId === familyId);
+    const firstMatch = (state.referenceData.flavors || []).find((p) => p.familyId === familyId);
     if (firstMatch) {
       state.selectedFlavorId = firstMatch.id;
       render();
@@ -746,6 +784,117 @@ async function handleAction(action, target) {
     if (flavorId) {
       state.selectedFlavorId = flavorId;
       render();
+    }
+    return;
+  }
+
+  if (action === 'select-sub-category') {
+    state.refSubCategory = target.dataset.category || 'all';
+    render();
+    return;
+  }
+
+  if (action === 'cancel-ref-edit') {
+    state.editingSubId = null;
+    state.editingTechniqueId = null;
+    state.editingFlavorId = null;
+    render();
+    return;
+  }
+
+  if (action === 'new-substitution') {
+    state.editingSubId = '__new__';
+    render();
+    return;
+  }
+
+  if (action === 'edit-substitution') {
+    state.editingSubId = target.dataset.subId || null;
+    render();
+    return;
+  }
+
+  if (action === 'delete-substitution') {
+    const id = target.dataset.subId || '';
+    const item = (state.referenceData.substitutions || []).find((s) => s.id === id);
+    if (!item) return;
+    if (!window.confirm(`Delete substitution for "${item.missing}"?`)) return;
+    const nextSubs = deleteReferenceItem(state.referenceData.substitutions, id);
+    if (state.editingSubId === id) state.editingSubId = null;
+    await persistReferencePatch({ substitutions: nextSubs }, `Deleted substitution for "${item.missing}".`);
+    return;
+  }
+
+  if (action === 'new-technique') {
+    state.editingTechniqueId = '__new__';
+    render();
+    return;
+  }
+
+  if (action === 'edit-technique') {
+    state.editingTechniqueId = target.dataset.techniqueId || null;
+    render();
+    return;
+  }
+
+  if (action === 'delete-technique') {
+    const id = target.dataset.techniqueId || '';
+    const tech = (state.referenceData.techniques || []).find((t) => t.id === id);
+    if (!tech) return;
+    if (!window.confirm(`Delete technique card "${tech.title}"?`)) return;
+    const nextTechs = deleteReferenceItem(state.referenceData.techniques, id);
+    if (state.editingTechniqueId === id) state.editingTechniqueId = null;
+    await persistReferencePatch({ techniques: nextTechs }, `Deleted technique "${tech.title}".`);
+    return;
+  }
+
+  if (action === 'new-flavor') {
+    state.editingFlavorId = '__new__';
+    render();
+    return;
+  }
+
+  if (action === 'edit-flavor') {
+    state.editingFlavorId = target.dataset.flavorId || null;
+    render();
+    return;
+  }
+
+  if (action === 'delete-flavor') {
+    const id = target.dataset.flavorId || '';
+    const flavor = (state.referenceData.flavors || []).find((f) => f.id === id);
+    if (!flavor) return;
+    if (!window.confirm(`Delete "${flavor.name}" from the Flavor Pairing Wheel?`)) return;
+    const nextFlavors = deleteFlavorItem(state.referenceData.flavors, id);
+    if (state.editingFlavorId === id) state.editingFlavorId = null;
+    if (state.selectedFlavorId === id) {
+      state.selectedFlavorId = nextFlavors[0]?.id || '';
+    }
+    await persistReferencePatch({ flavors: nextFlavors }, `Deleted "${flavor.name}" from Flavor Wheel.`);
+    return;
+  }
+
+  if (action === 'reset-ref-section') {
+    const section = target.dataset.section || '';
+    const defaults = getDefaultReferenceData();
+    if (section === 'substitutions') {
+      if (!window.confirm('Restore all default ingredient & spice substitutions?')) return;
+      state.editingSubId = null;
+      await persistReferencePatch({ substitutions: defaults.substitutions }, 'Restored default substitutions.');
+      return;
+    }
+    if (section === 'techniques') {
+      if (!window.confirm('Restore all default cooking technique cards?')) return;
+      state.editingTechniqueId = null;
+      await persistReferencePatch({ techniques: defaults.techniques }, 'Restored default technique cards.');
+      return;
+    }
+    if (section === 'flavors') {
+      if (!window.confirm('Restore all default Flavor Wheel herbs and spices?')) return;
+      state.editingFlavorId = null;
+      state.selectedFlavorId = defaults.flavors[0]?.id || 'rosemary';
+      await persistReferencePatch({ flavors: defaults.flavors }, 'Restored default Flavor Wheel entries.');
+      return;
     }
     return;
   }
@@ -967,6 +1116,7 @@ async function handleAction(action, target) {
       dividers: snapshot.dividers,
       dividersUpdatedMs: snapshot.dividersUpdatedMs,
       recipes: snapshot.recipes,
+      referenceData: snapshot.referenceData,
     });
     setNotice('positive', 'Exported JSON backup.');
     render();
@@ -1187,6 +1337,11 @@ document.addEventListener('input', (event) => {
     render();
     return;
   }
+  if (target.id === 'reference-sub-search') {
+    state.refSubQuery = target.value;
+    render();
+    return;
+  }
   if (target.id === 'reference-chart-search') {
     state.refChartQuery = target.value;
     render();
@@ -1400,6 +1555,78 @@ document.addEventListener('submit', async (event) => {
     await pushDividersToCloud(saved.dividers, saved.dividersUpdatedMs);
     setNotice('positive', `Added divider "${name}".`);
     render();
+    return;
+  }
+
+  if (form.id === 'ref-substitution-form') {
+    event.preventDefault();
+    const fd = new FormData(form);
+    const existingId = form.dataset.subId || '';
+    const list = state.referenceData.substitutions || [];
+    const candidate = normalizeSubstitution({
+      id: existingId || undefined,
+      missing: fd.get('missing'),
+      category: fd.get('category'),
+      amount: fd.get('amount'),
+      substitute: fd.get('substitute'),
+      notes: fd.get('notes'),
+    });
+    if (!existingId && list.some((s) => s.id === candidate.id)) {
+      candidate.id = generateId('sub');
+    }
+    const nextSubs = upsertReferenceItem(list, candidate);
+    state.editingSubId = null;
+    await persistReferencePatch({ substitutions: nextSubs }, `Saved substitution for "${candidate.missing}".`);
+    return;
+  }
+
+  if (form.id === 'ref-technique-form') {
+    event.preventDefault();
+    const fd = new FormData(form);
+    const existingId = form.dataset.techId || '';
+    const list = state.referenceData.techniques || [];
+    const candidate = normalizeTechnique({
+      id: existingId || undefined,
+      title: fd.get('title'),
+      category: fd.get('category'),
+      time: fd.get('time'),
+      summary: fd.get('summary'),
+      keywords: fd.get('keywords'),
+      steps: fd.get('steps'),
+      visualCue: fd.get('visualCue'),
+      commonMistake: fd.get('commonMistake'),
+    });
+    if (!existingId && list.some((t) => t.id === candidate.id)) {
+      candidate.id = generateId('tech');
+    }
+    const nextTechs = upsertReferenceItem(list, candidate);
+    state.editingTechniqueId = null;
+    await persistReferencePatch({ techniques: nextTechs }, `Saved technique "${candidate.title}".`);
+    return;
+  }
+
+  if (form.id === 'ref-flavor-form') {
+    event.preventDefault();
+    const fd = new FormData(form);
+    const existingId = form.dataset.flavorId || '';
+    const list = state.referenceData.flavors || [];
+    const candidate = normalizeFlavor({
+      id: existingId || undefined,
+      name: fd.get('name'),
+      familyId: fd.get('familyId'),
+      profile: fd.get('profile'),
+      cuisineVibe: fd.get('cuisineVibe'),
+      bestWith: fd.get('bestWith'),
+      pairsWellWith: fd.getAll('pairsWellWith'),
+      substitutes: fd.get('substitutes'),
+    });
+    if (!existingId && list.some((f) => f.id === candidate.id)) {
+      candidate.id = generateId('flv');
+    }
+    const nextFlavors = upsertReferenceItem(list, candidate);
+    state.editingFlavorId = null;
+    state.selectedFlavorId = candidate.id;
+    await persistReferencePatch({ flavors: nextFlavors }, `Saved "${candidate.name}" to Flavor Wheel.`);
     return;
   }
 

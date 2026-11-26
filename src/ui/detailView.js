@@ -66,6 +66,7 @@ function renderClassicSheet({
   scaledServings,
   methods,
   activeMethodIndex,
+  techniques,
   showAllMethods = false,
   extraClass = '',
 }) {
@@ -105,7 +106,7 @@ function renderClassicSheet({
             const stepsHtml =
               (method.steps || []).length > 0
                 ? `<ol class="classic-steps-list">
-                    ${method.steps.map((step) => `<li>${renderLinkedStepHtml(step, escapeHtml)}</li>`).join('')}
+                    ${method.steps.map((step) => `<li>${renderLinkedStepHtml(step, escapeHtml, techniques)}</li>`).join('')}
                   </ol>`
                 : '<p class="muted">No instructions listed.</p>';
             return `
@@ -133,7 +134,7 @@ function renderClassicSheet({
     const stepsListHtml =
       (activeMethod.steps || []).length > 0
         ? `<ol class="classic-steps-list">
-            ${activeMethod.steps.map((step) => `<li>${renderLinkedStepHtml(step, escapeHtml)}</li>`).join('')}
+            ${activeMethod.steps.map((step) => `<li>${renderLinkedStepHtml(step, escapeHtml, techniques)}</li>`).join('')}
           </ol>`
         : '<p class="muted">No instructions listed.</p>';
 
@@ -222,6 +223,7 @@ export function renderDetailView({
   detailLayout = 'binder',
   activeMethodIndex = 0,
   printMethodsMode = 'selected',
+  techniques,
 }) {
   if (!recipe || recipe.deleted) {
     return `
@@ -330,6 +332,7 @@ export function renderDetailView({
           scaledServings,
           methods,
           activeMethodIndex: methodIdx,
+          techniques,
           showAllMethods: false,
           extraClass: 'no-print',
         })}
@@ -341,6 +344,7 @@ export function renderDetailView({
           scaledServings,
           methods,
           activeMethodIndex: methodIdx,
+          techniques,
           showAllMethods: true,
           extraClass: 'print-only',
         })}
@@ -353,6 +357,7 @@ export function renderDetailView({
           scaledServings,
           methods,
           activeMethodIndex: methodIdx,
+          techniques,
           showAllMethods: false,
           extraClass: '',
         });
@@ -412,7 +417,7 @@ export function renderDetailView({
                   ${checked ? 'checked' : ''}
                 />
                 <span class="step-num">${index + 1}.</span>
-                <span class="step-text">${renderLinkedStepHtml(step, escapeHtml)}</span>
+                <span class="step-text">${renderLinkedStepHtml(step, escapeHtml, techniques)}</span>
               </label>
             </li>`;
           })
@@ -442,6 +447,7 @@ export function renderDetailView({
     scaledServings,
     methods,
     activeMethodIndex: methodIdx,
+    techniques,
     showAllMethods: printAllMethods,
     extraClass: 'print-only',
   });

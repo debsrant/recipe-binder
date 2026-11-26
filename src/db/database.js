@@ -2,6 +2,7 @@ import Dexie from 'dexie';
 import { DB_NAME, IS_TEST_STAGE } from '../config.js';
 import { DEFAULT_DIVIDERS, SEED_RECIPES } from '../data/seedRecipes.js';
 import { normalizeDivider, normalizeRecipe } from '../lib/collection.js';
+import { getDefaultReferenceData, normalizeReferenceData } from '../lib/reference.js';
 
 export const db = new Dexie(DB_NAME);
 
@@ -35,18 +36,20 @@ export async function initDatabase() {
 }
 
 /**
- * Reads the full local snapshot (recipes including tombstones, ordered dividers, and timestamp).
+ * Reads the full local snapshot (recipes including tombstones, ordered dividers, referenceData, and timestamp).
  */
 export async function getSnapshot() {
-  const [recipes, dividers, divMeta] = await Promise.all([
+  const [recipes, dividers, divMeta, refMeta] = await Promise.all([
     db.recipes.toArray(),
     db.dividers.orderBy('order').toArray(),
     db.meta.get('dividersUpdatedMs'),
+    db.meta.get('referenceData'),
   ]);
   return {
     recipes,
     dividers: dividers.length > 0 ? dividers : DEFAULT_DIVIDERS,
     dividersUpdatedMs: Number(divMeta?.value || 0),
+    referenceData: refMeta?.value ? normalizeReferenceData(refMeta.value) : getDefaultReferenceData(),
   };
 }
 
@@ -138,6 +141,18 @@ export async function saveDividers(dividersInput) {
 }
 
 /**
+ * Saves updated reference data (substitutions, technique cards, flavor wheel) with a fresh timestamp.
+ */
+export async function saveReferenceData(referenceInput) {
+  const normalized = normalizeReferenceData({
+    ...referenceInput,
+    updatedMs: Date.now(),
+  });
+  await db.meta.put({ key: 'referenceData', value: normalized });
+  return normalized;
+}
+
+/**
  * Applies a merged snapshot (from cloud sync or merge import) into IndexedDB.
  */
 export async function applyMergedSnapshot(snapshot) {
@@ -148,6 +163,7 @@ export async function applyMergedSnapshot(snapshot) {
   const fallbackId = dividers[0]?.id || 'weeknight';
   const recipes = (snapshot?.recipes || []).map((r) => normalizeRecipe(r, fallbackId));
   const dividersUpdatedMs = Number(snapshot?.dividersUpdatedMs || Date.now());
+  const hasRef = Boolean(snapshot?.referenceData);
 
   await db.transaction('rw', db.dividers, db.recipes, db.meta, async () => {
     if (dividers.length > 0) {
@@ -156,6 +172,12 @@ export async function applyMergedSnapshot(snapshot) {
     }
     if (recipes.length > 0) {
       await db.recipes.bulkPut(recipes);
+    }
+    if (hasRef) {
+      await db.meta.put({
+        key: 'referenceData',
+        value: normalizeReferenceData(snapshot.referenceData),
+      });
     }
     await db.meta.put({ key: 'dividersUpdatedMs', value: dividersUpdatedMs });
     await db.meta.put({ key: 'seeded', value: true, updatedMs: Date.now() });
@@ -178,6 +200,7 @@ export async function replaceAllData(snapshot) {
   const fallbackId = dividers[0]?.id || 'weeknight';
   const recipes = (snapshot?.recipes || []).map((r) => normalizeRecipe(r, fallbackId));
   const dividersUpdatedMs = Number(snapshot?.dividersUpdatedMs || Date.now());
+  const hasRef = Boolean(snapshot?.referenceData);
 
   await db.transaction('rw', db.dividers, db.recipes, db.meta, async () => {
     await db.dividers.clear();
@@ -185,6 +208,12 @@ export async function replaceAllData(snapshot) {
     await db.dividers.bulkPut(dividers);
     if (recipes.length > 0) {
       await db.recipes.bulkPut(recipes);
+    }
+    if (hasRef) {
+      await db.meta.put({
+        key: 'referenceData',
+        value: normalizeReferenceData(snapshot.referenceData),
+      });
     }
     await db.meta.put({ key: 'dividersUpdatedMs', value: dividersUpdatedMs });
     await db.meta.put({ key: 'seeded', value: true, updatedMs: Date.now() });
@@ -204,6 +233,7 @@ export async function resetToSeedData() {
     dividers: DEFAULT_DIVIDERS,
     dividersUpdatedMs: Date.now(),
     recipes: SEED_RECIPES.map((r) => ({ ...r, updatedMs: Date.now() })),
+    referenceData: getDefaultReferenceData(),
   });
 }
 

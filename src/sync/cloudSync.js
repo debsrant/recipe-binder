@@ -24,6 +24,7 @@ import {
 } from 'firebase/firestore';
 import { FIREBASE_CONFIG, FIRESTORE_STAGE_DOC, IS_FIREBASE_CONFIGURED } from '../config.js';
 import { mergeCollectionSnapshots, normalizeDivider, normalizeRecipe } from '../lib/collection.js';
+import { normalizeReferenceData } from '../lib/reference.js';
 
 const CLIENT_ID =
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -116,7 +117,15 @@ async function writeDividersDoc(uid, dividers, dividersUpdatedMs) {
     dividersUpdatedMs: Number(dividersUpdatedMs || Date.now()),
     updatedBy: CLIENT_ID,
   };
-  await setDoc(getStageDocRef(uid), payload);
+  await setDoc(getStageDocRef(uid), payload, { merge: true });
+}
+
+async function writeReferenceDoc(uid, referenceData) {
+  const payload = {
+    referenceData: normalizeReferenceData(referenceData),
+    updatedBy: CLIENT_ID,
+  };
+  await setDoc(getStageDocRef(uid), payload, { merge: true });
 }
 
 async function writeRecipeDoc(uid, recipe, fallbackDividerId) {
@@ -158,6 +167,7 @@ async function startUserSync(user) {
     const remoteSnapshot = {
       dividers: remoteMeta?.dividers || [],
       dividersUpdatedMs: Number(remoteMeta?.dividersUpdatedMs || 0),
+      referenceData: remoteMeta?.referenceData || null,
       recipes: remoteRecipes,
     };
 
@@ -170,6 +180,12 @@ async function startUserSync(user) {
 
     if (!remoteMeta || merged.dividersUpdatedMs > Number(remoteMeta.dividersUpdatedMs || 0)) {
       pendingWrites.push(writeDividersDoc(user.uid, merged.dividers, merged.dividersUpdatedMs));
+    }
+
+    const localRefMs = Number(merged.referenceData?.updatedMs || 0);
+    const remoteRefMs = Number(remoteMeta?.referenceData?.updatedMs || 0);
+    if (localRefMs > 0 && (!remoteMeta?.referenceData || localRefMs > remoteRefMs)) {
+      pendingWrites.push(writeReferenceDoc(user.uid, merged.referenceData));
     }
 
     for (const recipe of merged.recipes) {
@@ -216,6 +232,7 @@ async function startUserSync(user) {
       const merged = mergeCollectionSnapshots(local, {
         dividers: data?.dividers || [],
         dividersUpdatedMs: Number(data?.dividersUpdatedMs || 0),
+        referenceData: data?.referenceData || null,
         recipes: [],
       });
       await callbacks.onMergedSnapshot(merged);
@@ -364,6 +381,24 @@ export async function pushDividersToCloud(dividers, dividersUpdatedMs) {
   }
 }
 
+export async function pushReferenceDataToCloud(referenceData) {
+  if (!IS_FIREBASE_CONFIGURED || !auth?.currentUser || !db) return;
+  emitStatus({ status: navigator.onLine ? 'syncing' : 'offline' });
+  try {
+    await writeReferenceDoc(auth.currentUser.uid, referenceData);
+    emitStatus({
+      status: navigator.onLine ? 'synced' : 'offline',
+      lastSyncedAt: nowTimeLabel(),
+      error: '',
+    });
+  } catch (err) {
+    emitStatus({
+      status: navigator.onLine ? 'error' : 'offline',
+      error: formatAuthError(err),
+    });
+  }
+}
+
 export async function forceSyncAllToCloud(snapshot) {
   if (!IS_FIREBASE_CONFIGURED || !auth?.currentUser || !db) return;
   emitStatus({ status: navigator.onLine ? 'syncing' : 'offline', error: '' });
@@ -371,6 +406,9 @@ export async function forceSyncAllToCloud(snapshot) {
     const uid = auth.currentUser.uid;
     const fallbackId = snapshot?.dividers?.[0]?.id || 'weeknight';
     await writeDividersDoc(uid, snapshot?.dividers || [], snapshot?.dividersUpdatedMs || Date.now());
+    if (snapshot?.referenceData) {
+      await writeReferenceDoc(uid, snapshot.referenceData);
+    }
     await Promise.all((snapshot?.recipes || []).map((r) => writeRecipeDoc(uid, r, fallbackId)));
     emitStatus({
       status: navigator.onLine ? 'synced' : 'offline',

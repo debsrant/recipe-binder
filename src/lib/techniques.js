@@ -3,8 +3,8 @@ import { TECHNIQUE_CARDS } from '../data/referenceGuide.js';
 /**
  * Looks up a single technique card by ID.
  */
-export function getTechniqueById(id) {
-  return TECHNIQUE_CARDS.find((t) => t.id === id) || null;
+export function getTechniqueById(id, techniques = TECHNIQUE_CARDS) {
+  return (techniques || TECHNIQUE_CARDS).find((t) => t.id === id) || null;
 }
 
 function buildKeywordMatchers(techniques) {
