@@ -14,6 +14,7 @@ export const PANTRY_LOCATIONS = [
   { id: 'fridge', label: 'Fridge' },
   { id: 'freezer', label: 'Freezer' },
   { id: 'spice-rack', label: 'Spice Rack' },
+  { id: 'canning-shelf', label: 'Canning Shelf / Cellar' },
 ];
 
 export const PANTRY_STATUSES = [

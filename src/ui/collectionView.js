@@ -3,8 +3,10 @@ import {
   collectTags,
   filterAndSortRecipes,
   getRecipeMethods,
+  hasCanningSpecs,
   normalizeSafeImageUrl,
 } from '../lib/collection.js';
+import { isMixRecipe } from '../lib/subRecipes.js';
 import { escapeHtml, formatMinutes } from './helpers.js';
 
 function asIdSet(value) {
@@ -61,28 +63,28 @@ export function renderCollectionView({
   const allMethods = collectMethods(activeRecipes);
   const allTags = collectTags(activeRecipes);
 
-  const dividerTabsHtml = [
-    `<button type="button" class="binder-tab ${
-      activeDividerId === 'all' && !favoritesOnly ? 'is-active' : ''
-    }" data-action="select-divider" data-divider-id="all">
-      <span>All Recipes</span>
-      <span class="tab-count">${activeRecipes.length}</span>
-    </button>`,
-    `<button type="button" class="binder-tab ${favoritesOnly ? 'is-active' : ''}" data-action="toggle-favorites-filter">
-      <span>Favorites</span>
-      <span class="tab-count">${favCount}</span>
-    </button>`,
-    ...(dividers || []).map((div) => {
-      const isSelected = !favoritesOnly && activeDividerId === div.id;
-      const count = countByDivider.get(div.id) || 0;
-      return `<button type="button" class="binder-tab ${
-        isSelected ? 'is-active' : ''
-      }" data-action="select-divider" data-divider-id="${escapeHtml(div.id)}">
-        <span>${escapeHtml(div.name)}</span>
-        <span class="tab-count">${count}</span>
-      </button>`;
-    }),
-  ].join('');
+  const dividerStripHtml = `
+    <div class="tag-filter-bar divider-filter-bar" role="tablist" aria-label="Filter by divider">
+      <span class="tag-filter-label">Dividers:</span>
+      <button type="button" class="tag-pill ${
+        activeDividerId === 'all' && !favoritesOnly ? 'is-active' : ''
+      }" data-action="select-divider" data-divider-id="all">All (${activeRecipes.length})</button>
+      <button type="button" class="tag-pill ${
+        favoritesOnly ? 'is-active' : ''
+      }" data-action="toggle-favorites-filter">Favorites (${favCount})</button>
+      ${(dividers || [])
+        .map((div) => {
+          const isSelected = !favoritesOnly && activeDividerId === div.id;
+          const count = countByDivider.get(div.id) || 0;
+          return `<button type="button" class="tag-pill ${
+            isSelected ? 'is-active' : ''
+          }" data-action="select-divider" data-divider-id="${escapeHtml(div.id)}">${escapeHtml(
+            div.name
+          )} (${count})</button>`;
+        })
+        .join('')}
+    </div>
+  `;
 
   const activeMethodLower = String(activeMethod || '').trim().toLowerCase();
   const methodStripHtml =
@@ -225,6 +227,16 @@ export function renderCollectionView({
                           <span class="badge badge-divider">${escapeHtml(dividerName)}</span>
                           ${methodBadgeHtml}
                           ${
+                            isMixRecipe(recipe, dividers)
+                              ? '<span class="badge badge-mix">Mix</span>'
+                              : ''
+                          }
+                          ${
+                            hasCanningSpecs(recipe.canning)
+                              ? '<span class="badge badge-canning">Canning</span>'
+                              : ''
+                          }
+                          ${
                             hasStorageOrReheat
                               ? '<span class="badge">Storage / Reheat</span>'
                               : ''
@@ -306,9 +318,6 @@ export function renderCollectionView({
   return `
     <section class="collection-shell">
       ${dropBannerHtml}
-      <div class="binder-tabs-bar" role="tablist" aria-label="Binder Dividers">
-        ${dividerTabsHtml}
-      </div>
 
       <div class="panel-card toolbar-card">
         <div class="collection-toolbar">
@@ -350,6 +359,7 @@ export function renderCollectionView({
             <button type="button" class="btn btn-primary" data-action="new-recipe">+ New Recipe</button>
           </div>
         </div>
+        ${dividerStripHtml}
         ${methodStripHtml}
         ${tagStripHtml}
       </div>

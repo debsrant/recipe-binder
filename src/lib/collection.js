@@ -136,6 +136,37 @@ export function normalizeSafeImageUrl(rawUrl) {
 }
 
 /**
+ * Normalizes optional home canning & preserving specifications on a recipe card.
+ */
+export function normalizeCanningSpecs(raw) {
+  return {
+    method: String(raw?.method || '').trim(),
+    jarSize: String(raw?.jarSize || '').trim(),
+    headspace: String(raw?.headspace || '').trim(),
+    processingTime: String(raw?.processingTime || '').trim(),
+    pressure: String(raw?.pressure || '').trim(),
+    altitudeNote: String(raw?.altitudeNote || '').trim(),
+    testedSource: String(raw?.testedSource || '').trim(),
+  };
+}
+
+/**
+ * Returns true if any canning specification field is populated.
+ */
+export function hasCanningSpecs(canning) {
+  if (!canning || typeof canning !== 'object') return false;
+  return Boolean(
+    String(canning.method || '').trim() ||
+      String(canning.jarSize || '').trim() ||
+      String(canning.headspace || '').trim() ||
+      String(canning.processingTime || '').trim() ||
+      String(canning.pressure || '').trim() ||
+      String(canning.altitudeNote || '').trim() ||
+      String(canning.testedSource || '').trim()
+  );
+}
+
+/**
  * Normalizes a recipe record into a consistent structure safe for storage and sync.
  */
 export function normalizeRecipe(input, fallbackDividerId = 'weeknight') {
@@ -165,6 +196,7 @@ export function normalizeRecipe(input, fallbackDividerId = 'weeknight') {
     storageNotes: String(input?.storageNotes || '').trim(),
     reheatNotes: String(input?.reheatNotes || '').trim(),
     sourceTranscript: String(input?.sourceTranscript || '').trim(),
+    canning: normalizeCanningSpecs(input?.canning),
     favorite: Boolean(input?.favorite),
     createdAt: String(input?.createdAt || nowIso),
     updatedMs: Number.isFinite(updatedMsNum) && updatedMsNum > 0 ? updatedMsNum : Date.now(),
@@ -229,6 +261,10 @@ export function filterAndSortRecipes(
         recipe.notes,
         recipe.storageNotes,
         recipe.reheatNotes,
+        recipe.canning?.method,
+        recipe.canning?.jarSize,
+        recipe.canning?.testedSource,
+        recipe.canning?.altitudeNote,
         ...(recipe.tags || []),
         ...(recipe.ingredients || []),
         ...(recipe.steps || []),

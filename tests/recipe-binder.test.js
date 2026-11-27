@@ -11,10 +11,18 @@ import {
   collectTags,
   filterAndSortRecipes,
   getRecipeMethods,
+  hasCanningSpecs,
   mergeCollectionSnapshots,
+  normalizeCanningSpecs,
   normalizeRecipe,
   parseTagsInput,
 } from '../src/lib/collection.js';
+import {
+  findMatchingMixes,
+  getMixRecipes,
+  isMixRecipe,
+  renderLinkedIngredientHtml,
+} from '../src/lib/subRecipes.js';
 import {
   parseMarkdownRecipe,
   recipeToFilename,
@@ -30,6 +38,7 @@ import {
 } from '../src/lib/recipeImport.js';
 import { validateRecipeUrl } from '../src/lib/webScraper.js';
 import {
+  METHOD_CONVERSION_PRESETS,
   aiJsonToRecipeDraft,
   aiJsonToRecipeMethod,
   appendGeneratedMethodToRecipe,
@@ -53,6 +62,8 @@ import {
   upsertNoteItem,
 } from '../src/lib/notes.js';
 import {
+  CANNING_ALTITUDE_ADJUSTMENTS,
+  CANNING_HEADSPACE_GUIDE,
   FLAVOR_FAMILIES,
   FLAVOR_PAIRINGS,
   FOOD_STORAGE_CATEGORIES,
@@ -95,6 +106,7 @@ import {
   upsertMealPrepItem,
 } from '../src/lib/mealPrep.js';
 import {
+  PANTRY_LOCATIONS,
   collectBinderIngredients,
   cyclePantryStatus,
   deletePantryItem,
@@ -1554,4 +1566,106 @@ test('Recipe image, storageNotes, reheatNotes, collection pinning/alphabetical s
   assert.equal(mergedDraft.servingSize, '1 1/2 cups');
   assert.equal(mergedDraft.storageNotes, 'Freeze up to 3 months.');
   assert.equal(mergedDraft.reheatNotes, 'Microwave 2 min covered.');
+});
+
+test('Mix / sub-recipe helper identifies mixes and links matching ingredient phrases cleanly', () => {
+  const mixDividers = [
+    { id: 'weeknight', name: 'Weeknight', order: 0 },
+    { id: 'mixes', name: 'Mixes & Staples', order: 1 },
+  ];
+  const onionMix = normalizeRecipe({
+    id: 'rec-onion-mix',
+    title: 'Onion Soup Mix',
+    dividerId: 'weeknight',
+    tags: ['mix'],
+    ingredients: ['1/4 cup dried onion flakes', '2 tbsp beef bouillon granules'],
+  });
+  const tacoMix = normalizeRecipe({
+    id: 'rec-taco-mix',
+    title: 'Homemade Taco Seasoning',
+    dividerId: 'mixes',
+    ingredients: ['1 tbsp chili powder', '1 tsp cumin'],
+  });
+  const beefDip = normalizeRecipe({
+    id: 'rec-dip',
+    title: 'French Onion Dip',
+    dividerId: 'weeknight',
+    ingredients: ['2 cups sour cream', '3 tbsp Onion Soup Mix'],
+  });
+
+  assert.equal(isMixRecipe(onionMix, mixDividers), true);
+  assert.equal(isMixRecipe(tacoMix, mixDividers), true);
+  assert.equal(isMixRecipe(beefDip, mixDividers), false);
+
+  const availableForDip = getMixRecipes([onionMix, tacoMix, beefDip], 'rec-dip', mixDividers);
+  assert.deepEqual(
+    availableForDip.map((r) => r.id),
+    ['rec-onion-mix', 'rec-taco-mix']
+  );
+
+  const matches = findMatchingMixes('3 tbsp Onion Soup Mix <extra>', availableForDip);
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].recipeId, 'rec-onion-mix');
+
+  const escapeFn = (s) =>
+    String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const linkedHtml = renderLinkedIngredientHtml('3 tbsp Onion Soup Mix <extra>', escapeFn, availableForDip);
+  assert.ok(linkedHtml.includes('data-action="open-mix-modal"'));
+  assert.ok(linkedHtml.includes('data-recipe-id="rec-onion-mix"'));
+  assert.ok(linkedHtml.includes('&lt;extra&gt;'));
+});
+
+test('Canning specs normalize, round-trip via Markdown, search cleanly, and Canning Shelf defaults work', () => {
+  const rawCanning = {
+    method: 'Water Bath',
+    jarSize: 'Pint',
+    headspace: '1/2 inch',
+    processingTime: '15 min',
+    pressure: '',
+    altitudeNote: '0-1,000 ft base; +5 min at 1,001-3,000 ft',
+    testedSource: 'Ball Complete Book',
+  };
+  const normalizedSpecs = normalizeCanningSpecs(rawCanning);
+  assert.equal(hasCanningSpecs(normalizedSpecs), true);
+  assert.equal(hasCanningSpecs(normalizeCanningSpecs({})), false);
+
+  const pickled = normalizeRecipe({
+    id: 'rec-pickles',
+    title: 'Dill Cucumber Pickles',
+    dividerId: 'sides',
+    tags: ['canning'],
+    ingredients: ['4 lbs pickling cucumbers', '2 cups white vinegar'],
+    methods: [{ id: 'm1', name: 'Water Bath Canner', cookMinutes: 15, note: '', steps: ['Process 15 min.'] }],
+    canning: rawCanning,
+  });
+
+  const md = recipeToMarkdown(pickled, { dividerName: 'Sides' });
+  assert.ok(md.includes('## Canning Specs'));
+  assert.ok(md.includes('- Method: Water Bath'));
+  assert.ok(md.includes('- Headspace: 1/2 inch'));
+  assert.ok(md.includes('- Tested Source: Ball Complete Book'));
+
+  const parsedBack = parseMarkdownRecipe(md, { dividers: TEST_DIVIDERS });
+  assert.deepEqual(parsedBack.canning, normalizedSpecs);
+
+  const searchMatches = filterAndSortRecipes([pickled], { query: 'Ball Complete Book' });
+  assert.equal(searchMatches.length, 1);
+
+  assert.ok(CANNING_HEADSPACE_GUIDE.length >= 3);
+  assert.ok(CANNING_ALTITUDE_ADJUSTMENTS.length >= 4);
+
+  assert.ok(PANTRY_LOCATIONS.some((loc) => loc.id === 'canning-shelf'));
+
+  const cannedShelfEntry = normalizeFreezerItem({
+    id: 'can-1',
+    title: 'Dill Pickles (Pint)',
+    storageLocation: 'canning-shelf',
+    storedDate: '2026-01-01',
+    portions: 6,
+  });
+  assert.equal(cannedShelfEntry.storageLocation, 'canning-shelf');
+  assert.equal(cannedShelfEntry.bestByDate, '2027-01-01');
+
+  assert.ok(METHOD_CONVERSION_PRESETS.includes('Toaster Oven'));
+  assert.equal(METHOD_CONVERSION_PRESETS.includes('Pressure Canner'), false);
 });

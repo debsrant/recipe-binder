@@ -1,4 +1,10 @@
-import { getRecipeMethods, normalizeTag, parseTagsInput } from './collection.js';
+import {
+  getRecipeMethods,
+  hasCanningSpecs,
+  normalizeCanningSpecs,
+  normalizeTag,
+  parseTagsInput,
+} from './collection.js';
 import { formatQuantity, scaleIngredientLine } from './scaling.js';
 
 function yamlQuote(value) {
@@ -202,6 +208,21 @@ export function recipeToMarkdown(recipe, { dividerName = '', scaleFactor = 1 } =
     body.push('', '## Reheating', '', String(recipe.reheatNotes).trim());
   }
 
+  if (hasCanningSpecs(recipe?.canning)) {
+    const c = normalizeCanningSpecs(recipe.canning);
+    const canningBullets = [];
+    if (c.method) canningBullets.push(`- Method: ${c.method}`);
+    if (c.jarSize) canningBullets.push(`- Jar Size: ${c.jarSize}`);
+    if (c.headspace) canningBullets.push(`- Headspace: ${c.headspace}`);
+    if (c.processingTime) canningBullets.push(`- Processing Time: ${c.processingTime}`);
+    if (c.pressure) canningBullets.push(`- Pressure: ${c.pressure}`);
+    if (c.altitudeNote) canningBullets.push(`- Altitude Note: ${c.altitudeNote}`);
+    if (c.testedSource) canningBullets.push(`- Tested Source: ${c.testedSource}`);
+    if (canningBullets.length > 0) {
+      body.push('', '## Canning Specs', '', ...canningBullets);
+    }
+  }
+
   return `${fmLines.join('\n')}\n\n${body.join('\n')}\n`;
 }
 
@@ -344,6 +365,7 @@ export function parseMarkdownRecipe(
   const notesLines = [];
   const storageLines = [];
   const reheatLines = [];
+  const canningLines = [];
 
   function ensureCurrentMethod() {
     if (!currentMethod) {
@@ -390,6 +412,10 @@ export function parseMarkdownRecipe(
         }
         if (/^(reheating?|microwave|reheating?\s*&\s*microwave)\b/.test(headingText)) {
           section = 'reheat';
+          continue;
+        }
+        if (/^(canning(?:\s+specs)?|preserving(?:\s+specs)?)\b/.test(headingText)) {
+          section = 'canning';
           continue;
         }
         if (/^(notes?|tips?|cook'?s(?:\s+margin)?\s+notes?|margin notes?|variations?)\b/.test(headingText)) {
@@ -510,6 +536,8 @@ export function parseMarkdownRecipe(
       storageLines.push(trimmed);
     } else if (section === 'reheat') {
       reheatLines.push(trimmed);
+    } else if (section === 'canning') {
+      canningLines.push(trimmed);
     }
   }
 
@@ -578,6 +606,22 @@ export function parseMarkdownRecipe(
   const notes = String(frontmatter.notes || notesLines.join('\n')).trim();
   const storageNotes = String(frontmatter.storageNotes || storageLines.join('\n')).trim();
   const reheatNotes = String(frontmatter.reheatNotes || reheatLines.join('\n')).trim();
+  const canningRaw = {};
+  for (const rawCanLine of canningLines) {
+    const cleanCan = cleanIngredientBullet(rawCanLine).replace(/\*\*/g, '');
+    const m = cleanCan.match(/^([A-Za-z ]+?)\s*:\s*(.+)$/);
+    if (!m) continue;
+    const key = m[1].trim().toLowerCase();
+    const val = m[2].trim();
+    if (key === 'method') canningRaw.method = val;
+    else if (key === 'jar size' || key === 'jarsize' || key === 'jars') canningRaw.jarSize = val;
+    else if (key === 'headspace') canningRaw.headspace = val;
+    else if (key === 'processing time' || key === 'processingtime' || key === 'time') canningRaw.processingTime = val;
+    else if (key === 'pressure' || key === 'psi') canningRaw.pressure = val;
+    else if (key === 'altitude note' || key === 'altitudenote' || key === 'altitude') canningRaw.altitudeNote = val;
+    else if (key === 'tested source' || key === 'testedsource' || key === 'source') canningRaw.testedSource = val;
+  }
+  const canning = normalizeCanningSpecs(canningRaw);
   const title =
     String(frontmatter.title || bodyTitle || titleFromFilename(filename) || 'Imported Recipe').trim();
 
@@ -599,6 +643,7 @@ export function parseMarkdownRecipe(
     notes,
     storageNotes,
     reheatNotes,
+    canning,
     favorite: Boolean(frontmatter.favorite),
     createdAt: String(frontmatter.createdAt || ''),
     updatedMs: Number(frontmatter.updatedMs || 0) || undefined,

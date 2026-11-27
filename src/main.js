@@ -37,10 +37,12 @@ import {
 import {
   getRecipeMethods,
   mergeCollectionSnapshots,
+  normalizeCanningSpecs,
   normalizeDivider,
   normalizeRecipe,
   parseTagsInput,
 } from './lib/collection.js';
+import { getMixRecipes } from './lib/subRecipes.js';
 import { recipeToFilename, recipeToMarkdown, slugifyFilename } from './lib/markdown.js';
 import {
   adjustFreezerPortions,
@@ -101,7 +103,7 @@ import {
   signUpWithEmail,
 } from './sync/cloudSync.js';
 import { renderCollectionView } from './ui/collectionView.js';
-import { renderDetailView } from './ui/detailView.js';
+import { renderDetailView, renderMixModal } from './ui/detailView.js';
 import { renderDividersView } from './ui/dividersView.js';
 import { renderEditorView } from './ui/editorView.js';
 import {
@@ -243,6 +245,8 @@ const state = {
   scaleFactor: 1,
   activeMethodIndex: 0,
   activeTechniqueId: null,
+  activeMixRecipeId: null,
+  mixModalScale: 1,
   referenceTab: 'converter',
   mealPrepTab: 'freezer',
   freezerFilter: 'all',
@@ -469,6 +473,7 @@ function renderMainContent() {
       activeMethodIndex: state.activeMethodIndex,
       printMethodsMode: state.printMethodsMode,
       techniques: state.referenceData.techniques,
+      mixRecipes: recipe ? getMixRecipes(state.recipes, recipe.id, state.dividers) : [],
       linkedNotes,
       aiConfig: state.aiConfig,
       cookAiOpen: state.cookAiOpen,
@@ -648,6 +653,13 @@ function render() {
   const selStart = focusId ? activeEl.selectionStart : null;
   const selEnd = focusId ? activeEl.selectionEnd : null;
 
+  const activeMixRecipe = state.activeMixRecipeId
+    ? state.recipes.find((r) => r.id === state.activeMixRecipeId && !r.deleted) || null
+    : null;
+  const activeMixDividerName = activeMixRecipe
+    ? state.dividers.find((d) => d.id === activeMixRecipe.dividerId)?.name || ''
+    : '';
+
   root.innerHTML = `
     ${renderTopbar()}
     <main class="content-area">
@@ -656,6 +668,12 @@ function render() {
       ${renderMainContent()}
     </main>
     ${renderTechniqueModal(state.activeTechniqueId, state.referenceData.techniques)}
+    ${renderMixModal({
+      recipe: activeMixRecipe,
+      scaleFactor: state.mixModalScale,
+      unitMode: state.unitMode,
+      dividerName: activeMixDividerName,
+    })}
   `;
 
   if (focusId) {
@@ -865,6 +883,15 @@ function readEditorFormIntoDraft() {
     storageNotes: String(fd.get('storageNotes') || ''),
     reheatNotes: String(fd.get('reheatNotes') || ''),
     sourceTranscript: String(fd.get('sourceTranscript') || ''),
+    canning: normalizeCanningSpecs({
+      method: fd.get('canningMethod'),
+      jarSize: fd.get('canningJarSize'),
+      headspace: fd.get('canningHeadspace'),
+      processingTime: fd.get('canningProcessingTime'),
+      pressure: fd.get('canningPressure'),
+      altitudeNote: fd.get('canningAltitudeNote'),
+      testedSource: fd.get('canningTestedSource'),
+    }),
     favorite: fd.get('favorite') === 'on',
     createdAt: existing?.createdAt || state.draftRecipe?.createdAt || '',
   };
@@ -1011,6 +1038,8 @@ async function handleAction(action, target) {
 
   if (action === 'open-recipe') {
     resetCookSession(true);
+    state.activeMixRecipeId = null;
+    state.mixModalScale = 1;
     state.draftRecipe = null;
     state.selectedRecipeId = target.dataset.recipeId || null;
     if (state.activeMethod && state.selectedRecipeId) {
@@ -1162,6 +1191,43 @@ async function handleAction(action, target) {
   if (action === 'close-technique-modal') {
     state.activeTechniqueId = null;
     render();
+    return;
+  }
+
+  if (action === 'open-mix-modal') {
+    state.activeMixRecipeId = target.dataset.recipeId || null;
+    state.mixModalScale = 1;
+    render();
+    return;
+  }
+
+  if (action === 'close-mix-modal') {
+    state.activeMixRecipeId = null;
+    state.mixModalScale = 1;
+    render();
+    return;
+  }
+
+  if (action === 'set-mix-modal-scale') {
+    const nextScale = Number(target.dataset.scale);
+    if (Number.isFinite(nextScale) && nextScale > 0) {
+      state.mixModalScale = nextScale;
+      render();
+    }
+    return;
+  }
+
+  if (action === 'quick-toggle-recipe-tag') {
+    const tag = parseTagsInput(target.dataset.tag || '')[0];
+    const tagsInput = document.getElementById('rec-tags');
+    if (!tag || !tagsInput) return;
+    const currentTags = parseTagsInput(tagsInput.value || '');
+    const exists = currentTags.includes(tag);
+    const nextTags = exists ? currentTags.filter((t) => t !== tag) : [...currentTags, tag];
+    tagsInput.value = nextTags.join(', ');
+    const isNowActive = !exists;
+    target.classList.toggle('is-active', isNowActive);
+    target.setAttribute('aria-pressed', isNowActive ? 'true' : 'false');
     return;
   }
 
@@ -2888,13 +2954,13 @@ document.addEventListener('click', (event) => {
     return;
   }
   if (
-    action === 'close-technique-modal' &&
+    (action === 'close-technique-modal' || action === 'close-mix-modal') &&
     actionEl.classList.contains('modal-backdrop') &&
     event.target !== actionEl
   ) {
     return;
   }
-  if (action === 'open-technique-modal') {
+  if (action === 'open-technique-modal' || action === 'open-mix-modal') {
     event.preventDefault();
     event.stopPropagation();
   }
@@ -2906,6 +2972,12 @@ document.addEventListener('click', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && state.activeMixRecipeId) {
+    state.activeMixRecipeId = null;
+    state.mixModalScale = 1;
+    render();
+    return;
+  }
   if (event.key === 'Escape' && state.activeTechniqueId) {
     state.activeTechniqueId = null;
     render();
@@ -3150,7 +3222,8 @@ document.addEventListener('change', async (event) => {
     const bestByInput = form.querySelector('#freezer-bestby-date');
     const baseMs = Date.parse(`${storedInput?.value || new Date().toISOString().slice(0, 10)}T00:00:00Z`);
     if (bestByInput && Number.isFinite(baseMs)) {
-      const days = target.value === 'fridge' ? 4 : 90;
+      const days =
+        target.value === 'fridge' ? 4 : target.value === 'canning-shelf' ? 365 : 90;
       bestByInput.value = new Date(baseMs + days * 86400000).toISOString().slice(0, 10);
     }
     return;

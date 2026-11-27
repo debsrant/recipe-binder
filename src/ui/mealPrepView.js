@@ -16,8 +16,15 @@ const FREEZER_FILTERS = [
   { id: 'all', label: 'All Stored' },
   { id: 'freezer', label: 'Freezer Only' },
   { id: 'fridge', label: 'Fridge Only' },
+  { id: 'canning-shelf', label: 'Canning Shelf' },
   { id: 'use-soon', label: 'Use Soon / Expired' },
 ];
+
+function storageLocationLabel(loc) {
+  if (loc === 'fridge') return 'Fridge';
+  if (loc === 'canning-shelf') return 'Canning Shelf';
+  return 'Freezer';
+}
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -63,6 +70,7 @@ function renderFreezerTab({
   const totalPortions = activeItems.reduce((sum, i) => sum + (Number(i.portions) || 0), 0);
   const freezerCount = activeItems.filter((i) => i.storageLocation === 'freezer').length;
   const fridgeCount = activeItems.filter((i) => i.storageLocation === 'fridge').length;
+  const canningCount = activeItems.filter((i) => i.storageLocation === 'canning-shelf').length;
   const urgentCount = statuses.filter(
     ({ statusInfo }) => statusInfo.status === 'use-soon' || statusInfo.status === 'expired'
   ).length;
@@ -71,6 +79,7 @@ function renderFreezerTab({
   const filtered = statuses.filter(({ item, statusInfo }) => {
     if (freezerFilter === 'freezer' && item.storageLocation !== 'freezer') return false;
     if (freezerFilter === 'fridge' && item.storageLocation !== 'fridge') return false;
+    if (freezerFilter === 'canning-shelf' && item.storageLocation !== 'canning-shelf') return false;
     if (
       freezerFilter === 'use-soon' &&
       statusInfo.status !== 'use-soon' &&
@@ -126,9 +135,9 @@ function renderFreezerTab({
                 <div class="freezer-card-top">
                   <div class="freezer-card-title-group">
                     <div class="freezer-badges-row">
-                      <span class="storage-badge is-${escapeHtml(item.storageLocation)}">${
-                        item.storageLocation === 'fridge' ? 'Fridge' : 'Freezer'
-                      }</span>
+                      <span class="storage-badge is-${escapeHtml(item.storageLocation)}">${escapeHtml(
+                        storageLocationLabel(item.storageLocation)
+                      )}</span>
                       <span class="freshness-badge is-${escapeHtml(statusInfo.status)}">${escapeHtml(
                         statusInfo.label
                       )}</span>
@@ -218,6 +227,10 @@ function renderFreezerTab({
         <span class="kpi-value">${escapeHtml(String(fridgeCount))}</span>
       </div>
       <div class="kpi-box">
+        <span class="kpi-label">Canning Shelf</span>
+        <span class="kpi-value">${escapeHtml(String(canningCount))}</span>
+      </div>
+      <div class="kpi-box">
         <span class="kpi-label">Use Soon / Expired</span>
         <span class="kpi-value">${escapeHtml(String(urgentCount))}</span>
       </div>
@@ -281,6 +294,7 @@ function renderFreezerTab({
               <select id="freezer-location" name="storageLocation">
                 <option value="freezer" ${formModel.storageLocation === 'freezer' ? 'selected' : ''}>Freezer (90d default)</option>
                 <option value="fridge" ${formModel.storageLocation === 'fridge' ? 'selected' : ''}>Fridge (4d default)</option>
+                <option value="canning-shelf" ${formModel.storageLocation === 'canning-shelf' ? 'selected' : ''}>Canning Shelf / Cellar (1 yr default)</option>
               </select>
             </div>
             <div class="form-field">

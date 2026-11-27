@@ -1,18 +1,46 @@
 import { getAiStatusLabel, isAiReady } from '../lib/ai.js';
-import { getRecipeMethods, normalizeSafeImageUrl } from '../lib/collection.js';
+import {
+  getRecipeMethods,
+  hasCanningSpecs,
+  normalizeCanningSpecs,
+  normalizeSafeImageUrl,
+  parseTagsInput,
+} from '../lib/collection.js';
 import { escapeHtml } from './helpers.js';
 
 const COMMON_COOKING_METHODS = [
   'Skillet',
   'Stovetop',
   'Oven',
+  'Toaster Oven',
   'Instant Pot',
   'Slow Cooker',
   'Air Fryer',
   'Grill',
   'Griddle',
   'Dutch Oven',
+  'Water Bath Canner',
+  'Pressure Canner',
   'No-Cook',
+];
+
+const QUICK_RECIPE_TAGS = [
+  'toaster-oven',
+  'mix',
+  'canning',
+  'freezer-friendly',
+  'make-ahead',
+  'quick',
+];
+
+const CANNING_METHOD_OPTIONS = [
+  '',
+  'Water Bath',
+  'Steam Canner',
+  'Pressure Canner (Dial Gauge)',
+  'Pressure Canner (Weighted Gauge)',
+  'Refrigerator / Quick Pickle',
+  'Dry / Vacuum Pantry',
 ];
 
 export function renderEditorView({
@@ -54,6 +82,9 @@ export function renderEditorView({
   const hasStorageOrReheat = Boolean(
     String(activeRecipe.storageNotes || '').trim() || String(activeRecipe.reheatNotes || '').trim()
   );
+  const canning = normalizeCanningSpecs(activeRecipe.canning);
+  const hasCanning = hasCanningSpecs(canning);
+  const activeTagSet = new Set(parseTagsInput(activeRecipe.tags || []));
   const hasExtraMeta = Boolean(
     safeImage ||
       String(activeRecipe.source || '').trim() ||
@@ -381,6 +412,97 @@ export function renderEditorView({
           </div>
         </details>
 
+        <details class="editor-collapsible editor-canning-box" ${hasCanning ? 'open' : ''}>
+          <summary class="editor-collapsible-summary">
+            <span>Canning &amp; Preserving Specs</span>
+            <span class="badge">${hasCanning ? 'Filled' : 'Optional'}</span>
+          </summary>
+          <div class="editor-collapsible-body">
+            <p class="canning-safety-note">
+              <strong>Food Safety:</strong> Always verify headspace, processing time, and pressure (PSI) against a tested source (NCHFP, USDA, or Ball). Never water-bath low-acid foods.
+            </p>
+            <div class="form-grid">
+              <div class="form-field">
+                <label for="rec-canning-method">Canning Method</label>
+                <select id="rec-canning-method" name="canningMethod">
+                  ${CANNING_METHOD_OPTIONS.map(
+                    (opt) =>
+                      `<option value="${escapeHtml(opt)}" ${
+                        canning.method === opt ? 'selected' : ''
+                      }>${escapeHtml(opt || '-- Select Method --')}</option>`
+                  ).join('')}
+                </select>
+              </div>
+
+              <div class="form-field">
+                <label for="rec-canning-jar-size">Jar Size &amp; Pack</label>
+                <input
+                  id="rec-canning-jar-size"
+                  name="canningJarSize"
+                  type="text"
+                  value="${escapeHtml(canning.jarSize)}"
+                  placeholder="e.g., Pint / Half-pint, Hot pack"
+                />
+              </div>
+
+              <div class="form-field">
+                <label for="rec-canning-headspace">Headspace</label>
+                <input
+                  id="rec-canning-headspace"
+                  name="canningHeadspace"
+                  type="text"
+                  value="${escapeHtml(canning.headspace)}"
+                  placeholder="e.g., 1/4 inch, 1/2 inch, 1 inch"
+                />
+              </div>
+
+              <div class="form-field">
+                <label for="rec-canning-time">Processing Time</label>
+                <input
+                  id="rec-canning-time"
+                  name="canningProcessingTime"
+                  type="text"
+                  value="${escapeHtml(canning.processingTime)}"
+                  placeholder="e.g., 15 min water bath / 75 min pints"
+                />
+              </div>
+
+              <div class="form-field">
+                <label for="rec-canning-pressure">Pressure (if pressure canned)</label>
+                <input
+                  id="rec-canning-pressure"
+                  name="canningPressure"
+                  type="text"
+                  value="${escapeHtml(canning.pressure)}"
+                  placeholder="e.g., 10 lbs weighted / 11 lbs dial"
+                />
+              </div>
+
+              <div class="form-field">
+                <label for="rec-canning-altitude">Altitude Adjustment</label>
+                <input
+                  id="rec-canning-altitude"
+                  name="canningAltitudeNote"
+                  type="text"
+                  value="${escapeHtml(canning.altitudeNote)}"
+                  placeholder="e.g., 0-1,000 ft base; +5 min at 1,001-3,000 ft"
+                />
+              </div>
+
+              <div class="form-field form-span-2">
+                <label for="rec-canning-source">Tested Source / Reference</label>
+                <input
+                  id="rec-canning-source"
+                  name="canningTestedSource"
+                  type="text"
+                  value="${escapeHtml(canning.testedSource)}"
+                  placeholder="e.g., Ball Complete Book p. 214, NCHFP Tomatoes"
+                />
+              </div>
+            </div>
+          </div>
+        </details>
+
         <details class="editor-collapsible" ${hasExtraMeta ? 'open' : ''}>
           <summary class="editor-collapsible-summary">
             <span>Photo, Source, Tags &amp; Margin Notes</span>
@@ -437,6 +559,17 @@ export function renderEditorView({
                   value="${escapeHtml((activeRecipe.tags || []).join(', '))}"
                   placeholder="30-mins, dairy-free, kid-friendly"
                 />
+                <div class="editor-quick-tags-row" aria-label="Quick-add recipe tags">
+                  <span class="muted">Quick tags:</span>
+                  ${QUICK_RECIPE_TAGS.map((tag) => {
+                    const active = activeTagSet.has(tag);
+                    return `<button type="button" class="tag-chip quick-tag-chip ${
+                      active ? 'is-active' : ''
+                    }" data-action="quick-toggle-recipe-tag" data-tag="${escapeHtml(
+                      tag
+                    )}" aria-pressed="${active ? 'true' : 'false'}">#${escapeHtml(tag)}</button>`;
+                  }).join('')}
+                </div>
               </div>
 
               <div class="form-field form-span-2">

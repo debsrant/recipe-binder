@@ -1,4 +1,6 @@
 import {
+  CANNING_ALTITUDE_ADJUSTMENTS,
+  CANNING_HEADSPACE_GUIDE,
   FOOD_STORAGE_CATEGORIES,
   GRAIN_RATIOS,
   MEAT_TEMPERATURES,
@@ -554,6 +556,12 @@ function renderChartsTab(chartQuery = '', pinnedSet, collapsedSet, pinnedOnly) {
   const oilRows = OIL_SMOKE_POINTS.filter((r) =>
     matchesFilter([r.oil, r.smokeF, r.smokeC, r.bestFor, r.flavor], q)
   );
+  const headspaceRows = CANNING_HEADSPACE_GUIDE.filter((r) =>
+    matchesFilter([r.category, r.headspace, r.method, r.notes], q)
+  );
+  const altitudeRows = CANNING_ALTITUDE_ADJUSTMENTS.filter((r) =>
+    matchesFilter([r.altitude, r.waterBath, r.dialPsi, r.weightedPsi, r.notes], q)
+  );
 
   const chartCards = [
     {
@@ -664,6 +672,73 @@ function renderChartsTab(chartQuery = '', pinnedSet, collapsedSet, pinnedOnly) {
         </div>
       `,
     },
+    {
+      id: 'chart-canning-guide',
+      title: `Canning Quick Reference: Headspace & Altitude (${headspaceRows.length + altitudeRows.length})`,
+      bodyHtml: `
+        <p class="canning-safety-note">
+          <strong>Food Safety:</strong> Use this table as a quick kitchen check only. Always confirm exact processing times, acidification, and PSI against a current tested NCHFP, USDA, or Ball recipe.
+        </p>
+        <div class="ref-table-wrap" style="margin-bottom: 12px;">
+          <table class="ref-table">
+            <thead>
+              <tr>
+                <th>Food Category</th>
+                <th>Headspace</th>
+                <th>Safe Method</th>
+                <th>Safety Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                headspaceRows.length > 0
+                  ? headspaceRows
+                      .map(
+                        (r) => `<tr>
+                          <td><strong>${escapeHtml(r.category)}</strong></td>
+                          <td class="mono-cell">${escapeHtml(r.headspace)}</td>
+                          <td>${escapeHtml(r.method)}</td>
+                          <td>${escapeHtml(r.notes)}</td>
+                        </tr>`
+                      )
+                      .join('')
+                  : '<tr><td colspan="4" class="muted">No matching headspace entries.</td></tr>'
+              }
+            </tbody>
+          </table>
+        </div>
+        <div class="ref-table-wrap">
+          <table class="ref-table">
+            <thead>
+              <tr>
+                <th>Elevation</th>
+                <th>Water Bath Add-On</th>
+                <th>Dial Gauge PSI</th>
+                <th>Weighted Gauge PSI</th>
+                <th>Altitude Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                altitudeRows.length > 0
+                  ? altitudeRows
+                      .map(
+                        (r) => `<tr>
+                          <td><strong>${escapeHtml(r.altitude)}</strong></td>
+                          <td class="mono-cell">${escapeHtml(r.waterBath)}</td>
+                          <td class="mono-cell">${escapeHtml(r.dialPsi)}</td>
+                          <td class="mono-cell">${escapeHtml(r.weightedPsi)}</td>
+                          <td>${escapeHtml(r.notes)}</td>
+                        </tr>`
+                      )
+                      .join('')
+                  : '<tr><td colspan="5" class="muted">No matching altitude entries.</td></tr>'
+              }
+            </tbody>
+          </table>
+        </div>
+      `,
+    },
   ];
 
   const visibleCharts = sortPinnedFirst(
@@ -682,7 +757,7 @@ function renderChartsTab(chartQuery = '', pinnedSet, collapsedSet, pinnedOnly) {
             id="reference-chart-search"
             type="search"
             value="${escapeHtml(chartQuery)}"
-            placeholder="Filter charts (e.g., chicken, rice, avocado oil)..."
+            placeholder="Filter charts (e.g., chicken, rice, avocado oil, canning)..."
           />
         </div>
         <div class="ref-toolbar-actions">

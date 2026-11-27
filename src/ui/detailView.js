@@ -4,8 +4,14 @@ import {
   getAiStatusLabel,
   isAiReady,
 } from '../lib/ai.js';
-import { getRecipeMethods, normalizeSafeImageUrl } from '../lib/collection.js';
+import {
+  getRecipeMethods,
+  hasCanningSpecs,
+  normalizeCanningSpecs,
+  normalizeSafeImageUrl,
+} from '../lib/collection.js';
 import { formatQuantity } from '../lib/scaling.js';
+import { renderLinkedIngredientHtml } from '../lib/subRecipes.js';
 import { renderLinkedStepHtml } from '../lib/techniques.js';
 import { convertIngredientLine } from '../lib/units.js';
 import { escapeHtml, formatDateShort, formatMinutes } from './helpers.js';
@@ -64,6 +70,35 @@ function renderMethodTabsBar(methods, activeMethodIndex) {
   `;
 }
 
+function renderCanningSpecsContent(canning) {
+  const c = normalizeCanningSpecs(canning);
+  const rows = [
+    ['Method', c.method],
+    ['Jar Size & Pack', c.jarSize],
+    ['Headspace', c.headspace],
+    ['Processing Time', c.processingTime],
+    ['Pressure', c.pressure],
+    ['Altitude Note', c.altitudeNote],
+    ['Tested Source', c.testedSource],
+  ].filter(([, val]) => Boolean(val));
+
+  return `
+    <dl class="canning-specs-grid">
+      ${rows
+        .map(
+          ([label, val]) => `<div>
+            <dt>${escapeHtml(label)}</dt>
+            <dd>${escapeHtml(val)}</dd>
+          </div>`
+        )
+        .join('')}
+    </dl>
+    <p class="canning-safety-note">
+      <strong>Safety Reminder:</strong> Always verify canning times, headspace, and PSI against current tested NCHFP, USDA, or Ball guidelines.
+    </p>
+  `;
+}
+
 function renderClassicSheet({
   recipe,
   dividerName,
@@ -73,6 +108,7 @@ function renderClassicSheet({
   methods,
   activeMethodIndex,
   techniques,
+  mixRecipes = [],
   showAllMethods = false,
   extraClass = '',
 }) {
@@ -95,7 +131,14 @@ function renderClassicSheet({
     ingredients.length > 0
       ? `<ul class="classic-ingredients-list ${twoColClass}">
           ${ingredients
-            .map((line) => `<li>${escapeHtml(convertIngredientLine(line, unitMode, scaleFactor))}</li>`)
+            .map(
+              (line) =>
+                `<li>${renderLinkedIngredientHtml(
+                  convertIngredientLine(line, unitMode, scaleFactor),
+                  escapeHtml,
+                  mixRecipes
+                )}</li>`
+            )
             .join('')}
         </ul>`
       : '<p class="muted">No ingredients listed.</p>';
@@ -226,6 +269,15 @@ function renderClassicSheet({
           ? `<aside class="classic-notes">
               <h3>Microwave &amp; Reheating</h3>
               <p>${escapeHtml(recipe.reheatNotes)}</p>
+            </aside>`
+          : ''
+      }
+
+      ${
+        hasCanningSpecs(recipe.canning)
+          ? `<aside class="classic-notes classic-canning-box">
+              <h3>Canning &amp; Preserving Specs</h3>
+              ${renderCanningSpecsContent(recipe.canning)}
             </aside>`
           : ''
       }
@@ -417,6 +469,7 @@ export function renderDetailView({
   activeMethodIndex = 0,
   printMethodsMode = 'selected',
   techniques,
+  mixRecipes = [],
   linkedNotes = [],
   aiConfig = null,
   cookAiOpen = false,
@@ -555,6 +608,7 @@ export function renderDetailView({
           methods,
           activeMethodIndex: methodIdx,
           techniques,
+          mixRecipes,
           showAllMethods: false,
           extraClass: 'no-print',
         })}
@@ -567,6 +621,7 @@ export function renderDetailView({
           methods,
           activeMethodIndex: methodIdx,
           techniques,
+          mixRecipes,
           showAllMethods: true,
           extraClass: 'print-only',
         })}
@@ -580,6 +635,7 @@ export function renderDetailView({
           methods,
           activeMethodIndex: methodIdx,
           techniques,
+          mixRecipes,
           showAllMethods: false,
           extraClass: '',
         });
@@ -618,7 +674,7 @@ export function renderDetailView({
                   data-index="${index}"
                   ${checked ? 'checked' : ''}
                 />
-                <span>${escapeHtml(converted)}</span>
+                <span>${renderLinkedIngredientHtml(converted, escapeHtml, mixRecipes)}</span>
               </label>
             </li>`;
           })
@@ -666,6 +722,7 @@ export function renderDetailView({
   const hasStorageNotes = Boolean(String(recipe.storageNotes || '').trim());
   const hasReheatNotes = Boolean(String(recipe.reheatNotes || '').trim());
   const hasStorageOrReheat = hasStorageNotes || hasReheatNotes;
+  const hasCanning = hasCanningSpecs(recipe.canning);
 
   const printSheetHtml = renderClassicSheet({
     recipe,
@@ -676,6 +733,7 @@ export function renderDetailView({
     methods,
     activeMethodIndex: methodIdx,
     techniques,
+    mixRecipes,
     showAllMethods: printAllMethods,
     extraClass: 'print-only',
   });
@@ -820,6 +878,22 @@ export function renderDetailView({
             </details>
 
             ${
+              hasCanning
+                ? `<details class="panel-card detail-collapsible canning-specs-card" open>
+                    <summary class="detail-collapsible-summary">
+                      <span>Canning &amp; Preserving Specs</span>
+                      <span class="badge badge-canning">${escapeHtml(
+                        recipe.canning?.method || 'Preserving'
+                      )}</span>
+                    </summary>
+                    <div class="detail-collapsible-body">
+                      ${renderCanningSpecsContent(recipe.canning)}
+                    </div>
+                  </details>`
+                : ''
+            }
+
+            ${
               (linkedNotes || []).length > 0
                 ? `<details class="panel-card detail-collapsible linked-notes-card no-print">
                     <summary class="detail-collapsible-summary">
@@ -893,5 +967,108 @@ export function renderDetailView({
 
       ${printSheetHtml}
     </section>
+  `;
+}
+
+/**
+ * Renders the pop-up Mix / Sub-Recipe modal when clicking a linked mix ingredient inside another recipe.
+ */
+export function renderMixModal({
+  recipe,
+  scaleFactor = 1,
+  unitMode = 'original',
+  dividerName = '',
+} = {}) {
+  if (!recipe || recipe.deleted) return '';
+  const methods = getRecipeMethods(recipe);
+  const primaryMethod = methods[0] || { name: '', cookMinutes: 0, note: '', steps: [] };
+  const safeScale = Number(scaleFactor) > 0 && Number.isFinite(Number(scaleFactor)) ? Number(scaleFactor) : 1;
+  const scaledServings = formatQuantity((recipe.servings || 1) * safeScale) || String(recipe.servings || 1);
+
+  const ingredientsHtml =
+    (recipe.ingredients || []).length > 0
+      ? `<ul class="mix-modal-ingredients">
+          ${recipe.ingredients
+            .map((line) => `<li>${escapeHtml(convertIngredientLine(line, unitMode, safeScale))}</li>`)
+            .join('')}
+        </ul>`
+      : '<p class="muted">No ingredients listed for this mix.</p>';
+
+  const stepsHtml =
+    (primaryMethod.steps || []).length > 0
+      ? `<ol class="technique-steps mix-modal-steps">
+          ${primaryMethod.steps.map((s) => `<li>${escapeHtml(s)}</li>`).join('')}
+        </ol>`
+      : '<p class="muted">No preparation steps listed.</p>';
+
+  return `
+    <div
+      class="modal-backdrop no-print"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mix-modal-title"
+      data-action="close-mix-modal"
+    >
+      <div class="modal-card panel-card mix-modal-card">
+        <div class="modal-header">
+          <div class="card-badges-group">
+            <span class="badge badge-mix">Mix / Sub-Recipe</span>
+            ${dividerName ? `<span class="badge badge-divider">${escapeHtml(dividerName)}</span>` : ''}
+          </div>
+          <button type="button" class="btn btn-sm btn-secondary" data-action="close-mix-modal">Close</button>
+        </div>
+
+        <h2 id="mix-modal-title" class="technique-modal-title">${escapeHtml(recipe.title)}</h2>
+        ${recipe.summary ? `<p class="technique-summary">${escapeHtml(recipe.summary)}</p>` : ''}
+
+        <div class="mix-modal-scale-bar">
+          <span class="classic-scale-label">Scale Batch:</span>
+          <div class="seg-control" role="group" aria-label="Scale mix batch">
+            ${SCALE_OPTIONS.map(
+              (factor) => `<button
+                type="button"
+                class="seg-btn ${safeScale === factor ? 'is-active' : ''}"
+                data-action="set-mix-modal-scale"
+                data-scale="${factor}"
+              >${factor}x</button>`
+            ).join('')}
+          </div>
+          <span class="muted">Yields ${escapeHtml(scaledServings)}${
+            recipe.servingSize ? ` (${escapeHtml(recipe.servingSize)})` : ' servings'
+          }</span>
+        </div>
+
+        <div class="mix-modal-section">
+          <h3>Ingredients (${safeScale}x)</h3>
+          ${ingredientsHtml}
+        </div>
+
+        <div class="mix-modal-section">
+          <h3>Instructions${primaryMethod.name ? ` — ${escapeHtml(primaryMethod.name)}` : ''}</h3>
+          ${
+            primaryMethod.note
+              ? `<p class="method-note-callout"><strong>Note:</strong> ${escapeHtml(primaryMethod.note)}</p>`
+              : ''
+          }
+          ${stepsHtml}
+        </div>
+
+        ${
+          recipe.storageNotes
+            ? `<div class="technique-cue-box"><strong>Storage:</strong> ${escapeHtml(recipe.storageNotes)}</div>`
+            : ''
+        }
+
+        <div class="btn-row" style="margin-top: 14px; justify-content: flex-end;">
+          <button
+            type="button"
+            class="btn btn-outline"
+            data-action="open-recipe"
+            data-recipe-id="${escapeHtml(recipe.id)}"
+          >Open Full Mix Card →</button>
+          <button type="button" class="btn btn-primary" data-action="close-mix-modal">Back to Recipe</button>
+        </div>
+      </div>
+    </div>
   `;
 }

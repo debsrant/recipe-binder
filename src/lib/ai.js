@@ -15,6 +15,7 @@ export const GEMINI_MODELS = [
 
 export const METHOD_CONVERSION_PRESETS = [
   'Air Fryer',
+  'Toaster Oven',
   'Instant Pot',
   'Slow Cooker',
   'Oven',

@@ -1,7 +1,7 @@
 import { getRecipeMethods } from './collection.js';
 import { scaleIngredientLine } from './scaling.js';
 
-const STORAGE_LOCATION_SET = new Set(['freezer', 'fridge']);
+const STORAGE_LOCATION_SET = new Set(['freezer', 'fridge', 'canning-shelf']);
 
 function cleanText(value, fallback = '') {
   const str = String(value ?? '').trim();
@@ -72,7 +72,8 @@ export function normalizeFreezerItem(item) {
   const storedDate = normalizeDateIso(item?.storedDate, todayIsoDate());
   const rawLocation = cleanText(item?.storageLocation, 'freezer').toLowerCase();
   const storageLocation = STORAGE_LOCATION_SET.has(rawLocation) ? rawLocation : 'freezer';
-  const defaultBestBy = addDaysIso(storedDate, storageLocation === 'fridge' ? 4 : 90);
+  const defaultDays = storageLocation === 'fridge' ? 4 : storageLocation === 'canning-shelf' ? 365 : 90;
+  const defaultBestBy = addDaysIso(storedDate, defaultDays);
   const hasPortions =
     item?.portions !== '' && item?.portions !== null && item?.portions !== undefined;
   const rawPortions = hasPortions ? Number(item.portions) : NaN;

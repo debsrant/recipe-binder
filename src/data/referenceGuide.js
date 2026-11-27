@@ -836,3 +836,68 @@ export const FOOD_STORAGE_TIMES = [
   { id: 'st-spices-whole', categoryId: 'storage-pantry', food: 'Whole Spices (Peppercorns, Cinnamon, Cumin)', fridge: '—', freezer: '—', pantry: '3–4 years', notes: 'Toast in a dry pan to wake up aging whole spices' },
   { id: 'st-baking-leaveners', categoryId: 'storage-pantry', food: 'Baking Powder & Baking Soda', fridge: '—', freezer: '—', pantry: 'Baking powder 6–12m / Soda 2y', notes: 'Test powder in warm water (should fizz); soda in splash of vinegar' },
 ];
+
+export const CANNING_HEADSPACE_GUIDE = [
+  {
+    category: 'Jams, Jellies & Fruit Spreads',
+    headspace: '1/4 inch',
+    method: 'Water Bath / Steam',
+    notes: 'Allows proper vacuum seal without syrupy boil-over',
+  },
+  {
+    category: 'High-Acid Fruits, Tomatoes, Pickles & Salsa',
+    headspace: '1/2 inch',
+    method: 'Water Bath / Steam (or Pressure)',
+    notes: 'Acidify tomatoes per NCHFP (2 tbsp bottled lemon juice or 1/2 tsp citric acid per quart)',
+  },
+  {
+    category: 'Low-Acid Vegetables, Meats, Poultry, Soups & Stocks',
+    headspace: '1 inch',
+    method: 'Pressure Canner ONLY',
+    notes: 'Never water-bath low-acid foods (botulism risk); verify exact time by jar size',
+  },
+  {
+    category: 'Dry Goods & Dehydrated Mixes (Vacuum-Sealed Jars)',
+    headspace: '1/2–1 inch',
+    method: 'Dry Pantry / Vacuum',
+    notes: 'Not heat-processed; store cool, dark, and completely dry',
+  },
+];
+
+export const CANNING_ALTITUDE_ADJUSTMENTS = [
+  {
+    altitude: '0 – 1,000 ft',
+    waterBath: 'Base time',
+    dialPsi: '11 lbs',
+    weightedPsi: '10 lbs',
+    notes: 'Standard sea-level tested recipe baseline',
+  },
+  {
+    altitude: '1,001 – 2,000 ft',
+    waterBath: '+5 min',
+    dialPsi: '11 lbs',
+    weightedPsi: '15 lbs',
+    notes: 'Weighted gauge jumps to 15 lbs above 1,000 ft',
+  },
+  {
+    altitude: '2,001 – 3,000 ft',
+    waterBath: '+5 min',
+    dialPsi: '12 lbs',
+    weightedPsi: '15 lbs',
+    notes: 'Water bath >20 min base time: +10 min (confirm chart)',
+  },
+  {
+    altitude: '3,001 – 6,000 ft',
+    waterBath: '+10 min',
+    dialPsi: '12–13 lbs',
+    weightedPsi: '15 lbs',
+    notes: 'Dial: 12 lbs (2,001–4,000 ft), 13 lbs (4,001–6,000 ft)',
+  },
+  {
+    altitude: '6,001 – 8,000 ft',
+    waterBath: '+15 min',
+    dialPsi: '14 lbs',
+    weightedPsi: '15 lbs',
+    notes: 'Always confirm exact time/PSI with USDA / NCHFP tables',
+  },
+];
