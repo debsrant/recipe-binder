@@ -38,9 +38,9 @@ When asked to update `GEMINI.md` or sync project progress:
 
 ### 4. Tech Stack & Attached Services
 * **Frontend / Core:** `Vanilla ES6 JavaScript, HTML5, CSS3 (flat-utilitarian-warm-parchment theme variants: Parchment, Slate, Dusk), Vite, VitePWA`
-* **Local Storage / DB:** `IndexedDB via Dexie.js (RecipeBinderDB_Test in TEST / RecipeBinderDB in LIVE) + localStorage preferences (recipe-binder:theme, recipe-binder:fontScale, recipe-binder:detailLayout, recipe-binder:printMethodsMode, recipe-binder:unitMode)`
+* **Local Storage / DB:** `IndexedDB via Dexie.js (RecipeBinderDB_Test in TEST / RecipeBinderDB in LIVE; stores: recipes, dividers, meta holding referenceData, mealPrepData, pantryData, notesData) + localStorage preferences (recipe-binder:theme, recipe-binder:fontScale, recipe-binder:detailLayout, recipe-binder:printMethodsMode, recipe-binder:unitMode, recipe-binder:refPinnedCards, recipe-binder:refCollapsedCards, recipe-binder:notesPinnedCards, recipe-binder:notesCollapsedCards, recipe-binder:recipePinnedCards, recipe-binder:recipeCollapsedCards, recipe-binder:aiConfig)`
 * **Cloud / External Services:** `Optional Firebase Auth (Google + Email/Password) & Cloud Firestore (users/{uid}/recipeBinder/state_{test|live}/recipes) with offline persistence; GitHub Pages deployment via .github/workflows/deploy-pages.yml`
-* **AI / LLM Endpoints:** `None (100% Offline-Capable)`
+* **AI / LLM Endpoints:** `Optional Dual-Backend AI (100% Offline-Capable by default): Local Ollama via Vite proxy (/api/ai/ollama/* -> OLLAMA_BASE_URL, default http://127.0.0.1:11434) or BYOK Gemini API v1 Interactions REST (gemini-4-hydrogen, gemini-3.5-flash-lite, gemini-4-argon; key stored in browser localStorage only)`
 
 ### 5. Tracked Variables, Ports & Config Keys
 *(AI: Keep this table updated with variable names and local ports—never log actual secret values.)*
@@ -54,8 +54,9 @@ When asked to update `GEMINI.md` or sync project progress:
 | `VITE_FIREBASE_MESSAGING_SENDER_ID` | Optional Firebase Messaging sender ID | `.env.example` / `src/config.js` |
 | `VITE_FIREBASE_APP_ID` | Optional Firebase App ID | `.env.example` / `src/config.js` |
 | `VITE_RECIPE_PROXY_URL` | Optional custom URL proxy for static hosting web-recipe scraping | `.env.example` / `src/config.js` |
-| `localhost:5176` | Vite local dev server (`strictPort: true`, `dev:lan` for kitchen devices) | `vite.config.js` |
-| `localhost:4174` | Vite PWA preview server (`strictPort: true`, `preview:lan` for kitchen devices) | `vite.config.js` |
+| `OLLAMA_BASE_URL` | Optional local Ollama base URL for Vite dev/preview proxy (`/api/ai/ollama/*`; default `http://127.0.0.1:11434`) | `.env.example` / `vite.config.js` |
+| `localhost:5176` | Vite local dev server (`strictPort: true`, `dev:lan`; serves `/api/fetch-recipe`, `/api/fetch-transcript`, `/api/ai/ollama/*`) | `vite.config.js` |
+| `localhost:4174` | Vite PWA preview server (`strictPort: true`, `preview:lan`; serves `/api/fetch-recipe`, `/api/fetch-transcript`, `/api/ai/ollama/*`) | `vite.config.js` |
 
 ### 6. Architectural Decisions & Changelog
 *(AI: Append a dated 1-line note whenever a new library, schema change, or structural pattern is introduced.)*
@@ -68,6 +69,10 @@ When asked to update `GEMINI.md` or sync project progress:
 * `2026-11-26`: Implemented Phase 5 Batch Cooking & Meal Prep Engine (`src/lib/mealPrep.js`, `src/ui/mealPrepView.js`) with Freezer & Leftover Inventory ("Send to Freezer"), Merged Prep Timelines, "Cook Once, Eat Thrice" templates with IndexedDB/Firebase sync, and added `servingSize` yield labels across recipe cards, editor, detail view, and Markdown export/import.
 * `2026-11-26`: Implemented Phase 6 Virtual Pantry & "What Can I Make?" Ingredient Matcher (`src/lib/pantry.js`, `src/ui/pantryView.js`) with starter Always-Stocked staples, quick-add from recipes, missing-ingredient restock actions, IndexedDB persistence (`pantryData`), Firebase cloud sync, and JSON backup support.
 * `2026-11-27`: Replaced SVG Flavor Wheel with food-pairing-focused Herb & Spice Profiles (UMaine #4365 guide), added Food Storage Times reference tab across 6 categories, and made all Reference cards pinnable and collapsible via `localStorage` (`recipe-binder:refPinnedCards`, `recipe-binder:refCollapsedCards`).
+* `2026-11-27`: Added top-level **Notes** tab (`src/lib/notes.js`, `src/lib/transcript.js`, `src/ui/notesView.js`, `/api/fetch-transcript`) with YouTube inline player + clickable timestamp jump chips, Google Drive folder & inline PDF preview, bi-directional Recipe Linking, and Dexie/Firestore/JSON sync.
+* `2026-11-27`: Added optional dual-backend **AI Assistant** (`src/lib/ai.js`, `/api/ai/ollama/*` Vite proxy, Gemini v1 Interactions REST API) powering Notes Transcript -> Recipe & Summarize, Import AI cleanup, Editor AI Co-Pilot (Auto-Fill, Cleanup, Title, Yield, Storage/Reheat, Transcript re-extract, Undo), and Cook Mode Assistant (Generate New Method Tab + Ask About This Recipe + save-to-card actions).
+* `2026-11-27`: Redesigned Collection cards as horizontal, pinnable, collapsible, A–Z sorted cards with optional photo thumbnails (`imageUrl`), dedicated `storageNotes` / `reheatNotes`, `sourceTranscript`, collapsible Detail/Editor sections, and unified `Dividers:` filter strip above `Methods:` and `Tags:`.
+* `2026-11-27`: Added Clickable Mix / Sub-Recipe ingredient pop-ups (`src/lib/subRecipes.js`, `renderMixModal`), Canning & Preserving specs (`canning` schema + `## Canning Specs` Markdown round-trip + Reference Charts headspace/altitude guide + `canning-shelf` Pantry & Meal Prep location), and `Toaster Oven` cooking method + 1-click editor Quick-Tag chips.
 
 ### 7. Dev-Hub Runbook Integration
 * **Extracting Runbooks (`../dev-hub/runbooks/<topic>.md`):** When asked to *"turn this into a runbook"*, extract reusable, step-by-step terminal commands and configuration checklists, replacing project-specific names with `<placeholders>`.

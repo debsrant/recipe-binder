@@ -1,6 +1,6 @@
 # `Recipe Binder`
 
-An offline-first, cross-device digital kitchen recipe binder built with Vanilla ES6 JavaScript, Dexie (IndexedDB), VitePWA, and optional Firebase Cloud Firestore sync. Organize recipes with tactile binder divider tabs, cooking method filters, multi-tagging, fraction-aware serving scaling, traditional printable recipe sheets, `.md` export/import, and website/file/text recipe conversion across desktop, phone, and kitchen tablet.
+An offline-first, cross-device digital kitchen recipe binder built with Vanilla ES6 JavaScript, Dexie (IndexedDB), VitePWA, optional Firebase Cloud Firestore sync, and optional local Ollama or BYOK Gemini AI assistance. Organize recipes with horizontal pinnable cards, unified divider/method/tag filters, clickable mix pop-ups, canning specs, fraction-aware scaling, print-ready recipe sheets, batch meal prep, pantry matching, cooking video notes, and front-pocket reference charts across desktop, phone, and kitchen tablet.
 
 ---
 
@@ -15,10 +15,13 @@ An offline-first, cross-device digital kitchen recipe binder built with Vanilla 
 
 ### Core Features
 
-- **Recipe Cards, Dividers, Methods & Multi-Tagging:** Tactile divider tabs (`Weeknight Staples`, `Baking`, `Breakfast`, `Sides & Salads`, `Holiday Classics`, plus custom add/rename/reorder/delete), a **Methods:** filter bar above **Tags:** (`#tag` pills), full-text search across ingredients/notes/methods, Favorites toggle, and sort options (`Recently Updated`, `Title`, `Total Time`, `Favorites First`).
-- **Cook Mode, Multi-Method Tabs & Classic Print:** Responsive two-pane binder spread with per-recipe **multi-method cooking tabs** (`methods[]` such as `Skillet` vs. `Oven` or `Instant Pot` vs. `Slow Cooker`), single-method instruction badges, `0.5x`–`3x` fraction-aware scaling, checkable ingredients & method-scoped steps, Screen Wake Lock (`Keep Awake`), `Parchment` / `Slate` / `Dusk` themes, `A-` / `A` / `A+` text scale, auto-dismissing alerts, plus a **Classic Sheet** toggle and **Print: Selected / Print: All** traditional cookbook print layout (`@media print`).
-- **Import & Export Engine:** Single-recipe `.md` export/import (YAML frontmatter + `### Method` sections), bulk `.zip` Markdown export organized by divider folder, cooking website URL scraper (local Vite `/api/fetch-recipe` proxy + Schema.org JSON-LD/Microdata + CORS fallback), drag-and-drop file import (`.md`, `.txt`, `.html`, `.json`), and copy-paste text converter.
-- **Offline-First & Multi-Device Sync:** Local IndexedDB persistence via Dexie (`RecipeBinderDB_Test` / `RecipeBinderDB`), installable Workbox PWA (`vite-plugin-pwa`), lossless `.json` Export/Merge/Replace backups, and optional Firebase Auth + Firestore real-time sync with last-write-wins & soft-delete tombstones.
+- **Collection Cards, Unified Filter Bar & Dividers:** Unified **Dividers:** (`All`, `Favorites`, custom dividers), **Methods:** (`Skillet`, `Oven`, `Toaster Oven`, `Instant Pot`, etc.), and **Tags:** filter strips above horizontal, pinnable, collapsible, alphabetically sorted recipe cards with optional compressed thumbnails (`imageUrl`), quick `Mix` / `Canning` / `Storage / Reheat` badges, full-text search, and sort controls.
+- **Cook Mode, Mix Pop-Ups, Canning Specs & Classic Print:** Two-pane binder spread with **multi-method cooking tabs** (`methods[]`), `0.5x`–`3x` fraction-aware scaling, live Volume <-> Weight / US Weight unit conversion, checkable ingredients & method-scoped steps, clickable **Mix / Sub-Recipe** ingredient pop-ups (`#mix` / `#sub-recipe` recipes with independent modal scaling), inline **Technique Cards** step pop-ups, collapsible Margin Notes, Storage/Freezer & Microwave/Reheat instructions, **Canning & Preserving Specs** safety panel, Screen Wake Lock (`Keep Awake`), `Parchment` / `Slate` / `Dusk` themes, `A-` / `A` / `A+` text scale, and a **Classic Sheet** toggle with **Print: Selected / Print: All** cookbook printing (`@media print`).
+- **Import & Export Engine:** Single-recipe `.md` export/import (YAML frontmatter + `### Method` + `## Canning Specs`), bulk `.zip` Markdown export by divider folder, website URL scraper (`/api/fetch-recipe` proxy + Schema.org JSON-LD/Microdata + CORS fallback), drag-and-drop file import (`.md`, `.txt`, `.html`, `.json`), and paste-text converter with optional AI cleanup.
+- **Front Pocket Reference Guide:** Interactive **Unit Converter** (with kitchen ingredient densities), **Substitutions** (including Spices & Herbs), **Reference Charts** (Meat Temps, Grain Ratios, Oil Smoke Points, and **Canning Quick Reference: Headspace & Altitude**), **Food Storage Times** across 6 categories, **Technique Cards**, and **Herb & Spice Profiles** (all pinnable, collapsible, searchable, and customizable via IndexedDB + cloud sync).
+- **Batch Cooking & Virtual Pantry:** **Meal Prep** tab with **Freezer, Fridge & Canning Shelf** portion inventory (`Send to Freezer`), **Merged Prep Timeline**, and **Cook Once, Eat Thrice** templates; **Pantry** tab tracking ingredient locations (including `Canning Shelf / Cellar`) & Always-Stocked staples powering the **"What Can I Make?"** recipe matcher.
+- **Notes, Video Transcripts & Optional AI Assistant:** **Notes** tab with YouTube inline player + auto-fetched transcripts (`/api/fetch-transcript`) + clickable timestamp jump chips, Google Drive folder links & inline PDF preview, and bi-directional recipe links. Optional dual-backend AI (**Local Ollama** via `/api/ai/ollama/*` or **Gemini API BYOK**) powers Transcript -> Recipe extraction, Import cleanup, Editor Auto-Fill/Cleanup/Title/Yield/Storage-Reheat + Undo, and Cook Mode method adaptation & recipe Q&A.
+- **Offline-First & Multi-Device Sync:** Local IndexedDB persistence via Dexie (`RecipeBinderDB_Test` / `RecipeBinderDB`), installable Workbox PWA (`vite-plugin-pwa`), lossless `.json` Export/Merge/Replace backups, and optional Firebase Auth + Firestore real-time sync with last-write-wins & delete tombstones.
 
 ---
 
@@ -36,19 +39,19 @@ An offline-first, cross-device digital kitchen recipe binder built with Vanilla 
 # 1. Install dependencies
 npm.cmd install
 
-# 2. Start local development server (http://localhost:5176, includes /api/fetch-recipe proxy)
+# 2. Start local development server (http://localhost:5176, includes /api/* proxies)
 npm.cmd run dev
 
 # 3. Start LAN Wi-Fi server for phone / tablet testing (http://<PC-IP>:5176)
 npm.cmd run dev:lan
 
-# 4. Build & preview production PWA (http://localhost:4174, includes /api/fetch-recipe proxy)
+# 4. Build & preview production PWA (http://localhost:4174, includes /api/* proxies)
 npm.cmd run build; npm.cmd run preview
 ```
 
 ### Environment Files (`.env.example` vs. `.env.local`)
 
-- **`.env.example`** (committed to Git): Safe reference template showing supported `VITE_*` configuration keys.
+- **`.env.example`** (committed to Git): Safe reference template showing supported `VITE_*` and proxy environment keys.
 - **`.env.local`** (always in `.gitignore`, never committed): Machine-specific overrides and optional Firebase web app config.
 - **Protected Local Notes (`zed/`):** `zed/` is listed in `.gitignore` so personal notes, ideas, and roadmaps stay local and out of the public GitHub repository.
 - **Firebase Web Keys Note:** Firebase web app identifiers (`VITE_FIREBASE_*`) are public client config values bundled into the browser and protected by `firestore.rules` (`request.auth.uid == userId`). Never put admin or private server secrets in `VITE_*` variables.
@@ -64,8 +67,9 @@ npm.cmd run build; npm.cmd run preview
 | `VITE_FIREBASE_MESSAGING_SENDER_ID` | Browser | Optional | _(blank = offline-only)_ | Firebase Messaging sender ID |
 | `VITE_FIREBASE_APP_ID` | Browser | Optional | _(blank = offline-only)_ | Firebase Web App ID |
 | `VITE_RECIPE_PROXY_URL` | Browser | Optional | _(blank = local `/api/fetch-recipe` + CORS fallback)_ | Custom proxy URL for scraping recipes when hosted statically (e.g., GitHub Pages) |
+| `OLLAMA_BASE_URL` | Server (Vite proxy) | Optional | `http://127.0.0.1:11434` | Upstream Local Ollama URL for `/api/ai/ollama/*` dev/preview proxy |
 
-Example `.env.local` (create only when enabling Firebase sync, custom URL proxy, or switching to `LIVE`):
+Example `.env.local` (create only when enabling Firebase sync, custom URL proxy, custom Ollama host, or switching to `LIVE`):
 
 ```text
 VITE_SITE_STAGE=TEST
@@ -78,39 +82,47 @@ VITE_SITE_STAGE=TEST
 # VITE_FIREBASE_APP_ID=
 # Optional custom proxy for static hosting URL scraping:
 # VITE_RECIPE_PROXY_URL=
+# Optional local Ollama base URL for Vite proxy (/api/ai/ollama/*):
+# OLLAMA_BASE_URL=http://127.0.0.1:11434
 ```
 
-### Optional Services, Cloud Sync & Cross-Device Deployment
+### Optional Services, Local AI (Ollama), Gemini API & Cloud Sync
 
-- **100% Offline Mode by Default:** Without `.env.local` Firebase keys, the app runs completely offline with IndexedDB + Service Worker caching and `.md`/`.zip`/`.json` file backup/restore.
+- **100% Offline Mode by Default:** With **AI Provider = Off** and no `.env.local` Firebase keys, the app runs completely offline with IndexedDB + Service Worker caching and `.md`/`.zip`/`.json` file backup/restore.
+- **Optional Local AI (Ollama):**
+  - Run Ollama separately on your PC (`ollama serve` listening on `http://127.0.0.1:11434`; Vite's dev/preview server proxies `/api/ai/ollama/*` to `OLLAMA_BASE_URL`, or set a direct LAN URL inside **Sync & Backup -> AI Assistant Settings**).
+  - Recommended starter models: `llama3.2` (fast 3B default), `qwen2.5:3b` / `qwen2.5:7b`, or `gemma3:4b`. Useful commands: `ollama pull llama3.2`, `ollama list`, `ollama serve`, `ollama ps`.
+  - See `../dev-hub/guides/ollama-local-ai-and-env-local.md` for Windows setup and troubleshooting.
+- **Optional Cloud AI (Gemini API BYOK):**
+  - Obtain an API key from Google AI Studio and enter it under **Sync & Backup -> AI Assistant Settings** (`gemini-4-hydrogen` default, `gemini-3.5-flash-lite`, `gemini-4-argon`).
+  - Uses the Gemini `v1/interactions` REST API with `store: false`. The API key is stored **only in this browser's `localStorage`** (`recipe-binder:aiConfig`) and is **never synced to Cloud Firestore or exported `.json` backups**.
 - **Optional Firebase Cloud Sync:**
   1. Create a Firebase project and enable **Authentication** (Google and/or Email/Password) plus **Cloud Firestore**.
-  2. Publish `firestore.rules` in Firebase Console → Firestore Database → Rules.
+  2. Publish `firestore.rules` in Firebase Console -> Firestore Database -> Rules.
   3. Add your `VITE_FIREBASE_*` keys to `.env.local` (for local/LAN) or GitHub Repository Variables (for GitHub Pages).
   4. Note: Over local LAN IP (`http://192.168.x.x:5176`), use **Email & Password** sign-in unless that IP is added to Firebase Authorized Domains, or host via GitHub Pages HTTPS (with `<username>.github.io` added to Firebase Authorized Domains).
-- **GitHub Pages HTTPS Hosting:** Repository **Settings → Pages → Source: GitHub Actions** runs `.github/workflows/deploy-pages.yml` on pushes to `main`. See `../dev-hub/runbooks/github-pages-actions-deploy.md`.
-- **Local AI / Ollama:** None required (`100% Offline-Capable`).
+- **GitHub Pages HTTPS Hosting:** Repository **Settings -> Pages -> Source: GitHub Actions** runs `.github/workflows/deploy-pages.yml` on pushes to `main`. See `../dev-hub/runbooks/github-pages-actions-deploy.md`.
 
 ---
 
 ## How to Use (Daily Workflows)
 
-1. **Browse & Filter Collection:** Switch between **Binder Divider** tabs, filter by **Methods:** (`All`, `Skillet`, `Oven`, `Instant Pot`, etc.), click `#tag` pills, or search by title, ingredient, method, or note. Opening a recipe while a method filter is active jumps straight to that method tab.
-2. **Cook or Print From an Open Card:** Choose **Cook Mode** (split-pane spread with checkable ingredients/steps and **Keep Awake**) or **Classic Sheet** (traditional cookbook layout). On multi-method recipes, switch method tabs to update cook times and steps, use **Print: Selected / Print: All**, or click **Export .md** for a portable Markdown file.
-3. **Import From Web, Files, or Clipboard:** Open the **Import** tab (or click **+ Import**) to scrape a recipe webpage URL, drag-and-drop `.md` / `.txt` / `.html` / `.json` files (also works directly on the Collection view), or paste copied recipe text and convert it into an editable card.
-4. **Add, Edit & Manage Methods/Dividers:** Click **+ New Recipe** or **Edit** to manage ingredients and add/reorder/remove cooking methods (`+ Add Cooking Method`), or open **Dividers** to customize binder sections.
-5. **Sync Across Devices & Back Up:** Open **Sync & Backup** to sign in with Firebase, export all recipes as a `.zip` of `.md` files, import `.md` files, or export/merge/replace `.json` backups.
-6. **Switching `TEST` vs. `LIVE` Stage:** Set `VITE_SITE_STAGE=LIVE` in `.env.local` (and GitHub repo variables if hosted) when ready to separate production recipes (`RecipeBinderDB` / `state_live`) from sandbox testing (`RecipeBinderDB_Test` / `state_test`).
+1. **Browse, Pin & Filter Collection:** Use the unified **Dividers:** (`All`, `Favorites`, divider sections), **Methods:** (`All`, `Skillet`, `Toaster Oven`, `Instant Pot`, etc.), and **Tags:** bars, search across ingredients/notes/storage/canning specs, toggle **Pinned Only**, or pin/collapse horizontal recipe cards. Opening a recipe while a method filter is active jumps straight to that method tab.
+2. **Cook, Scale Mixes & Print:** Choose **Cook Mode** or **Classic Sheet**. Click highlighted ingredient **Mix / Sub-Recipe** links to open and scale mixes (`0.5x`–`3x`) in a modal without losing your place, click highlighted step **Technique** links for quick how-to cards, switch cooking method tabs (`Toaster Oven`, `Air Fryer`, etc.), review **Canning & Preserving Specs** or Storage/Reheat collapsibles, or open **AI Cook Assistant** to adapt a recipe to another appliance or ask live cooking questions.
+3. **Edit with Quick-Tag Chips & AI Helper:** In **Edit Recipe**, use 1-click **Quick tags** (`#toaster-oven`, `#mix`, `#canning`, `#freezer-friendly`, `#make-ahead`, `#quick`), record optional **Canning & Preserving Specs** (verifying against NCHFP/USDA/Ball sources), keep a **Source Video Transcript** open for reference, or use **AI Recipe Helper** (with 1-click Undo) to auto-fill missing summary/servings/yield/storage/reheat fields.
+4. **Capture Videos, Transcripts & Notes:** Open **Notes** to store YouTube cooking videos (with inline player, `/api/fetch-transcript` auto-caption fetch, timestamp stripping, and clickable timestamp jump chips), Google Drive folder links & inline PDF previews, and link them back to specific recipe cards (or convert transcripts directly into recipes via AI).
+5. **Plan Batches, Check Pantry & Reference Charts:** Track freezer leftovers, fridge meals, and long-shelf **Canning Shelf / Cellar** jars in **Meal Prep**, manage ingredients and run **"What Can I Make?"** in **Pantry**, and check conversions, substitutions, storage lifetimes, herb pairings, or **Canning Quick Reference (Headspace & Altitude)** in **Reference**.
+6. **Sync, Back Up & Switch Stage (`TEST` vs. `LIVE`):** Use **Sync & Backup** for Firebase sign-in, `.md` / `.zip` / `.json` backups, and AI provider setup. Set `VITE_SITE_STAGE=LIVE` in `.env.local` (and GitHub repo variables if hosted) when separating production recipes (`RecipeBinderDB` / `state_live`) from sandbox testing (`RecipeBinderDB_Test` / `state_test`).
 
 ---
 
 ## Data, Backups & Stage Management
 
 - **Where Data Lives:**
-  - Browser IndexedDB via Dexie: `RecipeBinderDB_Test` (`TEST`) or `RecipeBinderDB` (`LIVE`) with object stores `recipes`, `dividers`, and `meta`.
-  - UI preferences in `localStorage`: `recipe-binder:theme` (`parchment` | `slate` | `dusk`), `recipe-binder:fontScale` (`sm` | `md` | `lg`), `recipe-binder:detailLayout` (`binder` | `classic`), and `recipe-binder:printMethodsMode` (`selected` | `all`).
+  - Browser IndexedDB via Dexie: `RecipeBinderDB_Test` (`TEST`) or `RecipeBinderDB` (`LIVE`) with object stores `recipes`, `dividers`, and `meta` (`referenceData`, `mealPrepData`, `pantryData`, `notesData`).
+  - UI & local AI preferences in `localStorage`: `recipe-binder:theme`, `recipe-binder:fontScale`, `recipe-binder:detailLayout`, `recipe-binder:printMethodsMode`, `recipe-binder:unitMode`, `recipe-binder:refPinnedCards`, `recipe-binder:refCollapsedCards`, `recipe-binder:notesPinnedCards`, `recipe-binder:notesCollapsedCards`, `recipe-binder:recipePinnedCards`, `recipe-binder:recipeCollapsedCards`, and `recipe-binder:aiConfig` (Gemini API key remains strictly local to this browser).
   - Optional Cloud Firestore: `users/{uid}/recipeBinder/state_test` or `state_live` (plus `recipes` subcollection).
-- **Backup & Export Formats:** Single-recipe `.md` export/import, bulk `.zip` Markdown export (`<divider>/<recipe>.md`), and lossless `.json` full export/import with **Merge with Existing** (timestamp last-write-wins) or **Replace All Local Data** modes.
+- **Backup & Export Formats:** Single-recipe `.md` export/import (including `## Canning Specs`), bulk `.zip` Markdown export (`<divider>/<recipe>.md`), and lossless `.json` full export/import with **Merge with Existing** (timestamp last-write-wins) or **Replace All Local Data** modes.
 - **Stage Rules (`TEST` vs. `LIVE`):** In `TEST` mode, **Sync & Backup** exposes `Reset to Starter Recipes` and `Clear All Test Recipes`. In `LIVE` mode, those destructive sandbox actions are hidden and blocked at the database layer.
 
 ---
@@ -119,7 +131,7 @@ VITE_SITE_STAGE=TEST
 
 ```text
 recipe-binder/
-├── .env.example                       <-- Environment variable template
+├── .env.example                       <-- Safe environment variable template
 ├── .github/
 │   └── workflows/
 │       └── deploy-pages.yml           <-- GitHub Pages build & deploy workflow
@@ -137,33 +149,48 @@ recipe-binder/
 ├── src/
 │   ├── config.js                      <-- Stage flags, DB names, localStorage keys, Firebase & proxy env config
 │   ├── data/
-│   │   └── seedRecipes.js             <-- Default binder dividers & 4 starter recipes (single & multi-method)
+│   │   ├── referenceGuide.js          <-- Meat temps, grain ratios, oil smoke points, canning charts, storage times, techniques & herbs
+│   │   └── seedRecipes.js             <-- Default binder dividers & starter recipes
 │   ├── db/
 │   │   └── database.js                <-- Dexie IndexedDB schema, CRUD, tombstones & stage resets
 │   ├── lib/
-│   │   ├── collection.js              <-- Method/tag aggregation, filtering, sorting & cloud merge logic
-│   │   ├── markdown.js                <-- Single/multi-method Markdown serializer & parser
+│   │   ├── ai.js                      <-- Dual-backend AI client (Ollama proxy + Gemini Interactions API) & draft helpers
+│   │   ├── collection.js              <-- Method/tag/canning normalization, filtering, sorting & cloud merge logic
+│   │   ├── markdown.js                <-- Single/multi-method Markdown serializer & parser (incl. Canning Specs)
+│   │   ├── mealPrep.js                <-- Freezer/Fridge/Canning Shelf inventory, merged timeline & batch templates
+│   │   ├── notes.js                   <-- Notes, YouTube/Drive URL helpers, timestamps & snapshot merge
+│   │   ├── pantry.js                  <-- Virtual pantry locations, Always-Stocked staples & ingredient matcher
 │   │   ├── recipeImport.js            <-- Schema.org JSON-LD, Microdata, HTML & plain-text recipe converter
+│   │   ├── reference.js               <-- Reference Guide CRUD normalization, defaults & sync merge
 │   │   ├── scaling.js                 <-- Kitchen fraction parser & ingredient quantity scaler
+│   │   ├── subRecipes.js              <-- Mix / sub-recipe detection & safe ingredient cross-link builder
+│   │   ├── techniques.js              <-- Step keyword scanner & technique pop-up linker
+│   │   ├── transcript.js              <-- YouTube caption fetcher & timestamp cleaner client
+│   │   ├── units.js                   <-- Volume, weight, temperature & density unit converter
 │   │   ├── webScraper.js              <-- URL validation & proxy/CORS HTML fetcher
 │   │   └── zip.js                     <-- Zero-dependency STORE ZIP archive builder
-│   ├── main.js                        <-- App bootstrap, state controller, drag-drop & auto-dismiss notices
+│   ├── main.js                        <-- App bootstrap, state controller, modals, drag-drop & notices
 │   ├── style.css                      <-- Warm Parchment / Slate / Dusk flat utilitarian styles + @media print
 │   ├── sync/
 │   │   └── cloudSync.js               <-- Optional Firebase Auth & Firestore real-time sync
 │   └── ui/
-│       ├── collectionView.js          <-- Divider tabs, method/tag filters, search & recipe card grid
-│       ├── detailView.js              <-- Cook Mode, Classic Sheet, method tabs & Print Selected/All layout
+│       ├── collectionView.js          <-- Unified divider/method/tag filters, search & horizontal pinnable cards
+│       ├── detailView.js              <-- Cook Mode, Classic Sheet, mix modal, canning panel, Cook AI & print sheet
 │       ├── dividersView.js            <-- Add, rename, reorder & delete binder dividers
-│       ├── editorView.js              <-- Add / edit recipe card form with multi-method blocks
-│       ├── helpers.js                 <-- Escaping, formatting, Blob/text/JSON download & Wake Lock controller
-│       ├── importView.js              <-- URL scraper, file dropzone & paste-text converter view
-│       └── syncView.js                <-- Cloud sync, .zip/.md export & import, .json backup & TEST controls
+│       ├── editorView.js              <-- Recipe form with AI Helper, transcript box, canning specs & quick tags
+│       ├── helpers.js                 <-- Escaping, image compression, downloads & Wake Lock controller
+│       ├── importView.js              <-- URL scraper, file dropzone & paste-text converter with AI cleanup
+│       ├── mealPrepView.js            <-- Stored batch inventory (incl. Canning Shelf), timeline & templates UI
+│       ├── notesView.js               <-- Cooking notes, Drive links/PDFs, YouTube player & AI transcript conversion
+│       ├── pantryView.js              <-- Pantry inventory & "What Can I Make?" matcher UI
+│       ├── referenceView.js           <-- Unit converter, substitutions, charts, storage times, techniques & herb profiles
+│       └── syncView.js                <-- Cloud sync, AI settings, .zip/.md/.json backup & TEST stage controls
 ├── tests/
-│   └── recipe-binder.test.js          <-- Node built-in unit tests (22 tests)
-├── vite.config.js                     <-- Vite + VitePWA + /api/fetch-recipe dev/preview proxy (ports 5176 / 4174)
+│   └── recipe-binder.test.js          <-- Node built-in unit tests (40 tests)
+├── vite.config.js                     <-- Vite + VitePWA + /api/* proxies (ports 5176 / 4174)
 └── zed/                               <-- Local user notes, ideas & roadmap (gitignored & protected)
     ├── ai.md
+    ├── notes.md
     └── recipe-binder-roadmap.md
 ```
 
@@ -172,7 +199,7 @@ recipe-binder/
 ## Development & Verification
 
 ```powershell
-# Run unit tests (scaling, methods, tags, Markdown, ZIP, HTML/text import, merge)
+# Run unit tests (40 tests across scaling, mixes, canning, notes, pantry, meal prep, AI & Markdown)
 npm.cmd test
 
 # Build production PWA bundle and generate Service Worker + manifest
@@ -182,5 +209,6 @@ npm.cmd run build
 - **AI Coding Rules & Architecture State:** `./GEMINI.md`
 - **Phased Product Roadmap:** `./ROADMAP.md`
 - **Dev Hub Documentation:** `../dev-hub/README.md`
+- **Local Ollama Setup & `.env.local` Guide:** `../dev-hub/guides/ollama-local-ai-and-env-local.md`
 - **Dedicated Multi-Port Runbook:** `../dev-hub/runbooks/localhost-multi-port-setup.md`
 - **GitHub Pages Deploy Runbook:** `../dev-hub/runbooks/github-pages-actions-deploy.md`
