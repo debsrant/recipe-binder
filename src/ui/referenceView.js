@@ -42,12 +42,28 @@ function asIdSet(value) {
   return new Set(Array.isArray(value) ? value : []);
 }
 
-function sortPinnedFirst(items, getCardId, pinnedSet) {
+function sortPinnedFirst(items, getCardId, pinnedSet, getSortLabel = null) {
+  const pinOrder = new Map();
+  let idx = 0;
+  for (const id of pinnedSet) {
+    pinOrder.set(id, idx++);
+  }
+
   return [...items].sort((a, b) => {
-    const aPinned = pinnedSet.has(getCardId(a));
-    const bPinned = pinnedSet.has(getCardId(b));
-    if (aPinned === bPinned) return 0;
-    return aPinned ? -1 : 1;
+    const aId = getCardId(a);
+    const bId = getCardId(b);
+    const aPinned = pinnedSet.has(aId);
+    const bPinned = pinnedSet.has(bId);
+    if (aPinned !== bPinned) return aPinned ? -1 : 1;
+    if (aPinned && bPinned) {
+      return (pinOrder.get(aId) ?? 0) - (pinOrder.get(bId) ?? 0);
+    }
+    if (typeof getSortLabel === 'function') {
+      return String(getSortLabel(a) || '')
+        .trim()
+        .localeCompare(String(getSortLabel(b) || '').trim(), undefined, { sensitivity: 'base' });
+    }
+    return 0;
   });
 }
 
@@ -407,7 +423,7 @@ function renderSubstitutionsTab({
       .includes(cleanQuery);
   });
 
-  const visibleRows = sortPinnedFirst(filteredRows, (s) => `sub-${s.id}`, pinnedSet);
+  const visibleRows = sortPinnedFirst(filteredRows, (s) => `sub-${s.id}`, pinnedSet, (s) => s.missing);
   const visibleIds = visibleRows.map((s) => `sub-${s.id}`);
 
   const catButtons = [
@@ -920,12 +936,14 @@ function renderStorageTab({
                                 <td class="storage-duration-cell">${escapeHtml(r.pantry)}</td>
                                 <td>${escapeHtml(r.notes)}</td>
                                 <td class="table-actions-cell">
-                                  <button type="button" class="btn btn-sm btn-outline" data-action="edit-storage-item" data-storage-id="${escapeHtml(
-                                    r.id
-                                  )}">Edit</button>
-                                  <button type="button" class="btn btn-sm btn-danger-outline" data-action="delete-storage-item" data-storage-id="${escapeHtml(
-                                    r.id
-                                  )}">Delete</button>
+                                  <div class="table-actions-wrap">
+                                    <button type="button" class="btn btn-sm btn-outline" data-action="edit-storage-item" data-storage-id="${escapeHtml(
+                                      r.id
+                                    )}">Edit</button>
+                                    <button type="button" class="btn btn-sm btn-danger-outline" data-action="delete-storage-item" data-storage-id="${escapeHtml(
+                                      r.id
+                                    )}">Delete</button>
+                                  </div>
                                 </td>
                               </tr>`
                             )
@@ -1063,32 +1081,50 @@ function renderTechniqueEditorForm(editingTech) {
 }
 
 function renderTechniqueCardBody(tech) {
+  const steps = tech.steps || [];
+  const keywords = tech.keywords || [];
+
   return `
     <div class="technique-horiz-body">
       <div class="technique-horiz-main">
-        <p class="technique-summary">${escapeHtml(tech.summary)}</p>
-        <ol class="technique-steps">
-          ${(tech.steps || []).map((s) => `<li>${escapeHtml(s)}</li>`).join('')}
-        </ol>
+        ${tech.summary ? `<p class="technique-summary">${escapeHtml(tech.summary)}</p>` : ''}
+        ${
+          steps.length > 0
+            ? `<div class="technique-steps-box">
+                <span class="sub-field-label">Steps</span>
+                <ol class="technique-steps">
+                  ${steps.map((s) => `<li>${escapeHtml(s)}</li>`).join('')}
+                </ol>
+              </div>`
+            : ''
+        }
       </div>
       <div class="technique-horiz-side">
         ${
           tech.visualCue
-            ? `<div class="technique-cue-box"><strong>Visual Cue:</strong> ${escapeHtml(tech.visualCue)}</div>`
+            ? `<div class="technique-cue-box">
+                <h4>Visual Cue</h4>
+                <p>${escapeHtml(tech.visualCue)}</p>
+              </div>`
             : ''
         }
         ${
           tech.commonMistake
-            ? `<div class="technique-mistake-box"><strong>Avoid:</strong> ${escapeHtml(tech.commonMistake)}</div>`
+            ? `<div class="technique-mistake-box">
+                <h4>Avoid</h4>
+                <p>${escapeHtml(tech.commonMistake)}</p>
+              </div>`
             : ''
         }
-        <div class="technique-keywords-row">
-          <span class="muted">Recipe auto-links:</span>
-          ${
-            (tech.keywords || []).length > 0
-              ? tech.keywords.map((kw) => `<code>${escapeHtml(kw)}</code>`).join(' ')
-              : '<span class="muted">(none)</span>'
-          }
+        <div class="flavor-section">
+          <h4>Recipe Auto-Links</h4>
+          <div class="flavor-chip-row">
+            ${
+              keywords.length > 0
+                ? keywords.map((kw) => `<span class="badge">${escapeHtml(kw)}</span>`).join('')
+                : '<span class="muted">(none)</span>'
+            }
+          </div>
         </div>
       </div>
     </div>
@@ -1124,7 +1160,7 @@ function renderTechniquesTab({
     return hay.includes(cleanQuery);
   });
 
-  const visible = sortPinnedFirst(filtered, (t) => `tech-${t.id}`, pinnedSet);
+  const visible = sortPinnedFirst(filtered, (t) => `tech-${t.id}`, pinnedSet, (t) => t.title);
   const visibleIds = visible.map((t) => `tech-${t.id}`);
 
   const dynamicCats = Array.from(
@@ -1210,7 +1246,7 @@ function renderTechniquesTab({
                           <h3 class="technique-card-title">${escapeHtml(tech.title)}</h3>
                         </button>
                         <span class="badge badge-divider">${escapeHtml(tech.category)}</span>
-                        <span class="badge">${escapeHtml(tech.time)}</span>
+                        <span class="badge mono-cell">${escapeHtml(tech.time)}</span>
                       </div>
                       ${renderRefCardControls({
                         cardId,
@@ -1588,7 +1624,7 @@ function renderHerbProfilesTab({
     return hay.includes(cleanQuery);
   });
 
-  const visible = sortPinnedFirst(filtered, (f) => `herb-${f.id}`, pinnedSet);
+  const visible = sortPinnedFirst(filtered, (f) => `herb-${f.id}`, pinnedSet, (f) => f.name);
   const visibleIds = visible.map((f) => `herb-${f.id}`);
 
   const cuisineButtons = [

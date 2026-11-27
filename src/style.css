@@ -1531,44 +1531,85 @@ textarea {
   margin-bottom: 10px;
 }
 
-.technique-modal-title,
-.technique-card-title {
+.technique-modal-title {
   margin: 0 0 6px;
   font-size: 19px;
   color: var(--primary);
 }
 
+.technique-card-title {
+  margin: 0;
+  font-size: 17px;
+  color: inherit;
+}
+
 .technique-summary {
-  margin: 0 0 12px;
-  font-size: 15px;
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.technique-steps-box {
+  padding: 9px 11px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 
 .technique-steps {
-  margin: 0 0 12px;
-  padding-left: 20px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.modal-card .technique-steps {
+  margin-bottom: 12px;
 }
 
 .technique-steps li {
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+}
+
+.technique-steps li:last-child {
+  margin-bottom: 0;
 }
 
 .technique-cue-box {
-  padding: 8px 10px;
-  margin-bottom: 8px;
+  padding: 9px 11px;
+  margin-bottom: 0;
   background: var(--positive-bg);
   border: 1px solid var(--positive-border);
   border-left: 3px solid var(--pine);
   border-radius: var(--radius);
-  font-size: 14px;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.modal-card .technique-cue-box {
+  margin-bottom: 8px;
 }
 
 .technique-mistake-box {
-  padding: 8px 10px;
+  padding: 9px 11px;
   background: var(--warning-bg);
   border: 1px solid var(--warning-border);
   border-left: 3px solid var(--warning);
   border-radius: var(--radius);
-  font-size: 14px;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.technique-cue-box h4,
+.technique-mistake-box h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.technique-cue-box p,
+.technique-mistake-box p {
+  margin: 0;
+  font-size: 13.5px;
 }
 
 .technique-grid {
@@ -1580,7 +1621,6 @@ textarea {
 .technique-card {
   display: flex;
   flex-direction: column;
-  margin-bottom: 0;
 }
 
 .technique-horiz-body {
@@ -1592,17 +1632,7 @@ textarea {
 
 .technique-horiz-side {
   display: grid;
-  gap: 8px;
-}
-
-.technique-keywords-row {
-  margin-top: auto;
-  padding-top: 10px;
-  font-size: 12.5px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
+  gap: 10px;
 }
 
 .converter-mode-bar {
@@ -1855,7 +1885,7 @@ textarea {
 
 .herb-profile-title {
   margin: 0;
-  font-size: 18px;
+  font-size: 17px;
 }
 
 .herb-horiz-body {
@@ -1966,7 +1996,12 @@ textarea {
 
 .table-actions-cell {
   white-space: nowrap;
-  display: flex;
+  width: 1%;
+}
+
+.table-actions-wrap {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
 }
 
