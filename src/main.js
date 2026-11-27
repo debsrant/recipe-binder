@@ -19,7 +19,10 @@ import {
 } from './db/database.js';
 import {
   DEFAULT_AI_CONFIG,
+  appendGeneratedMethodToRecipe,
+  askAboutRecipeWithAi,
   extractRecipeWithAi,
+  generateCookingMethodWithAi,
   isAiReady,
   normalizeAiConfig,
   summarizeNoteWithAi,
@@ -202,6 +205,13 @@ const state = {
   aiBusyNoteId: '',
   isAiSummarizing: false,
   isAiCleaning: false,
+  cookAiOpen: false,
+  cookMethodTarget: 'Air Fryer',
+  isGeneratingMethod: false,
+  cookQaMessages: [],
+  cookQaInput: '',
+  isAskingCookQa: false,
+  cookAiError: '',
   recipes: [],
   dividers: [],
   dividersUpdatedMs: 0,
@@ -448,6 +458,14 @@ function renderMainContent() {
       printMethodsMode: state.printMethodsMode,
       techniques: state.referenceData.techniques,
       linkedNotes,
+      aiConfig: state.aiConfig,
+      cookAiOpen: state.cookAiOpen,
+      cookMethodTarget: state.cookMethodTarget,
+      isGeneratingMethod: state.isGeneratingMethod,
+      cookQaMessages: state.cookQaMessages,
+      cookQaInput: state.cookQaInput,
+      isAskingCookQa: state.isAskingCookQa,
+      cookAiError: state.cookAiError,
     });
   }
 
@@ -733,8 +751,56 @@ function resetCookSession(releaseLock = true) {
   state.activeMethodIndex = 0;
   state.checkedIngredients = new Set();
   state.checkedSteps = new Set();
+  state.cookQaMessages = [];
+  state.cookQaInput = '';
+  state.cookAiError = '';
+  state.isGeneratingMethod = false;
+  state.isAskingCookQa = false;
   if (releaseLock && wakeLock.isActive()) {
     wakeLock.release();
+  }
+}
+
+async function submitCookQaQuestion(rawQuestion) {
+  const question = String(rawQuestion || '').trim();
+  const recipe = state.recipes.find((r) => r.id === state.selectedRecipeId && !r.deleted);
+  if (!recipe) return;
+  if (!question) {
+    state.cookAiError = 'Enter a question about this recipe first.';
+    render();
+    return;
+  }
+  if (!isAiReady(state.aiConfig)) {
+    state.view = 'sync';
+    setNotice('warning', 'Configure Local Ollama or Gemini API below to ask questions while cooking.');
+    render();
+    return;
+  }
+
+  const prevHistory = [...state.cookQaMessages];
+  state.cookQaMessages = [...prevHistory, { role: 'user', text: question }];
+  state.cookQaInput = '';
+  state.cookAiError = '';
+  state.isAskingCookQa = true;
+  state.cookAiOpen = true;
+  render();
+
+  try {
+    const answer = await askAboutRecipeWithAi({
+      recipe,
+      activeMethodIndex: state.activeMethodIndex,
+      scaleFactor: state.scaleFactor,
+      unitMode: state.unitMode,
+      question,
+      history: prevHistory,
+      config: state.aiConfig,
+    });
+    state.cookQaMessages = [...state.cookQaMessages, { role: 'assistant', text: answer }];
+  } catch (err) {
+    state.cookAiError = err?.message || 'Could not get an AI response.';
+  } finally {
+    state.isAskingCookQa = false;
+    render();
   }
 }
 
@@ -2144,6 +2210,35 @@ async function handleAction(action, target) {
     return;
   }
 
+  if (action === 'toggle-cook-ai') {
+    state.cookAiOpen = !state.cookAiOpen;
+    state.cookAiError = '';
+    render();
+    if (state.cookAiOpen) {
+      document.getElementById('cook-ai-panel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    return;
+  }
+
+  if (action === 'select-cook-method-preset') {
+    state.cookMethodTarget = target.dataset.methodName || 'Air Fryer';
+    state.cookAiError = '';
+    render();
+    return;
+  }
+
+  if (action === 'cook-qa-clear') {
+    state.cookQaMessages = [];
+    state.cookAiError = '';
+    render();
+    return;
+  }
+
+  if (action === 'cook-qa-quick-ask') {
+    await submitCookQaQuestion(target.dataset.question || '');
+    return;
+  }
+
   if (action === 'add-editor-method') {
     const draft = readEditorFormIntoDraft();
     if (!draft) return;
@@ -2653,6 +2748,14 @@ document.addEventListener('input', (event) => {
   }
   if (target.id === 'paste-recipe-textarea') {
     state.pasteText = target.value;
+    return;
+  }
+  if (target.id === 'cook-method-target-input') {
+    state.cookMethodTarget = target.value;
+    return;
+  }
+  if (target.id === 'cook-qa-input') {
+    state.cookQaInput = target.value;
   }
 });
 
@@ -3310,6 +3413,67 @@ document.addEventListener('submit', async (event) => {
           }).`
     );
     render();
+    return;
+  }
+
+  if (formId === 'cook-generate-method-form') {
+    event.preventDefault();
+    const recipe = state.recipes.find((r) => r.id === state.selectedRecipeId && !r.deleted);
+    if (!recipe) return;
+    const fd = new FormData(form);
+    const targetMethod = String(fd.get('targetMethod') || state.cookMethodTarget || '').trim();
+    state.cookMethodTarget = targetMethod;
+    if (!targetMethod) {
+      state.cookAiError = 'Enter or select a target cooking method (e.g., Air Fryer, Instant Pot).';
+      render();
+      return;
+    }
+    if (!isAiReady(state.aiConfig)) {
+      state.view = 'sync';
+      setNotice('warning', 'Configure Local Ollama or Gemini API below to generate cooking methods.');
+      render();
+      return;
+    }
+
+    state.isGeneratingMethod = true;
+    state.cookAiError = '';
+    state.cookAiOpen = true;
+    render();
+
+    try {
+      const newMethod = await generateCookingMethodWithAi({
+        recipe,
+        activeMethodIndex: state.activeMethodIndex,
+        targetMethod,
+        scaleFactor: state.scaleFactor,
+        unitMode: state.unitMode,
+        config: state.aiConfig,
+      });
+      const { recipe: updatedRecipe, newMethodIndex } = appendGeneratedMethodToRecipe(
+        recipe,
+        newMethod
+      );
+      const saved = await saveRecipe(updatedRecipe);
+      applySnapshotToState(await getSnapshot());
+      state.activeMethodIndex = newMethodIndex;
+      state.checkedSteps = new Set();
+      setNotice('positive', `Added "${newMethod.name}" cooking method tab to "${saved.title}".`);
+      pushRecipeToCloud(saved, state.dividers[0]?.id).catch((err) => {
+        console.error('Recipe cloud sync failed:', err);
+      });
+    } catch (err) {
+      state.cookAiError = err?.message || 'Could not generate cooking method.';
+    } finally {
+      state.isGeneratingMethod = false;
+      render();
+    }
+    return;
+  }
+
+  if (formId === 'cook-ai-qa-form') {
+    event.preventDefault();
+    const fd = new FormData(form);
+    await submitCookQaQuestion(fd.get('question'));
     return;
   }
 
