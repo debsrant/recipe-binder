@@ -48,6 +48,7 @@ import {
   mergeReferenceData,
   normalizeFlavor,
   normalizeReferenceData,
+  normalizeStorageTime,
   normalizeSubstitution,
   normalizeTechnique,
   upsertReferenceItem,
@@ -994,11 +995,28 @@ test('referenceData includes spice substitutions and supports upsert, delete, pr
       appetizersBaking: 'Deviled eggs',
     },
     bestWith: ['Chicken', 'Eggs'],
+    pairsWellWith: ['parsley', 'Lemon Zest', 'Chives'],
   });
   assert.equal(customFlavor.id, 'tarragon');
   assert.deepEqual(customFlavor.bestWith, ['Chicken', 'Eggs']);
+  assert.deepEqual(customFlavor.pairsWellWith, ['parsley', 'Lemon Zest', 'Chives']);
   assert.equal(customFlavor.foodPairings.meats, 'Chicken, Salmon');
   assert.equal(customFlavor.foodPairings.appetizersBaking, 'Deviled eggs');
+
+  // Food Storage Times CRUD & defaults
+  assert.ok(Array.isArray(defaults.storageTimes) && defaults.storageTimes.length >= 25);
+  const customStorage = normalizeStorageTime({
+    food: 'Cooked Lentils',
+    categoryId: 'storage-leftovers',
+    fridge: '4-5 days',
+    freezer: '3 months',
+    pantry: 'Max 2 hrs',
+    notes: 'Portion into 1-cup jars before freezing',
+  });
+  assert.equal(customStorage.categoryId, 'storage-leftovers');
+  const updatedStorage = upsertReferenceItem(defaults.storageTimes, customStorage);
+  assert.equal(updatedStorage.length, defaults.storageTimes.length + 1);
+  assert.equal(deleteReferenceItem(updatedStorage, customStorage.id).length, defaults.storageTimes.length);
 });
 
 test('servingSize persists across normalizeRecipe, search, and Markdown round-trip', () => {

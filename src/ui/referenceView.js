@@ -1,7 +1,5 @@
 import {
-  FLAVOR_FAMILIES,
   FOOD_STORAGE_CATEGORIES,
-  FOOD_STORAGE_TIMES,
   GRAIN_RATIOS,
   MEAT_TEMPERATURES,
   OIL_SMOKE_POINTS,
@@ -31,14 +29,6 @@ const REF_TABS = [
 ];
 
 const DEFAULT_TECHNIQUE_CATEGORIES = ['Heat & Sauces', 'Baking & Dairy', 'Knife Skills', 'Prep'];
-
-const HERB_FOOD_FILTERS = [
-  { id: 'all', label: 'All Foods' },
-  { id: 'meats', label: 'Meats & Seafood' },
-  { id: 'vegetables', label: 'Vegetables' },
-  { id: 'soupsSalads', label: 'Soups, Salads & Sauces' },
-  { id: 'appetizersBaking', label: 'Appetizers & Baking' },
-];
 
 function getModeUnitOptions(mode) {
   if (mode === 'volume') return Object.values(VOLUME_UNITS);
@@ -387,6 +377,7 @@ function renderSubstitutionsTab({
   editingSubId = null,
   pinnedSet,
   collapsedSet,
+  pinnedOnly = false,
 }) {
   const cleanQuery = String(subQuery || '').trim().toLowerCase();
 
@@ -403,7 +394,9 @@ function renderSubstitutionsTab({
     ])
   );
 
-  const visibleRows = substitutions.filter((item) => {
+  const filteredRows = substitutions.filter((item) => {
+    const cardId = `sub-${item.id}`;
+    if (pinnedOnly && !pinnedSet.has(cardId)) return false;
     if (subCategory && subCategory !== 'all' && (item.category || 'Other') !== subCategory) {
       return false;
     }
@@ -413,6 +406,9 @@ function renderSubstitutionsTab({
       .toLowerCase()
       .includes(cleanQuery);
   });
+
+  const visibleRows = sortPinnedFirst(filteredRows, (s) => `sub-${s.id}`, pinnedSet);
+  const visibleIds = visibleRows.map((s) => `sub-${s.id}`);
 
   const catButtons = [
     `<button type="button" class="tag-pill ${subCategory === 'all' ? 'is-active' : ''}" data-action="select-sub-category" data-category="all">All (${substitutions.length})</button>`,
@@ -431,9 +427,61 @@ function renderSubstitutionsTab({
       ? substitutions.find((s) => s.id === editingSubId) || null
       : null;
 
-  const cardId = 'ref-substitutions-card';
-  const isPinned = pinnedSet.has(cardId);
-  const isCollapsed = collapsedSet.has(cardId);
+  const cardsHtml = visibleRows
+    .map((r) => {
+      const cardId = `sub-${r.id}`;
+      const isPinned = pinnedSet.has(cardId);
+      const isCollapsed = collapsedSet.has(cardId);
+      const extraButtonsHtml = `
+        <button type="button" class="btn btn-sm btn-outline" data-action="edit-substitution" data-sub-id="${escapeHtml(
+          r.id
+        )}">Edit</button>
+        <button type="button" class="btn btn-sm btn-danger-outline" data-action="delete-substitution" data-sub-id="${escapeHtml(
+          r.id
+        )}">Delete</button>
+      `;
+
+      return `
+        <article class="panel-card ref-card sub-card ${isPinned ? 'is-pinned' : ''} ${
+          isCollapsed ? 'is-collapsed' : ''
+        }">
+          <div class="ref-card-header">
+            <div class="ref-card-title-group">
+              <button
+                type="button"
+                class="ref-card-title-btn"
+                data-action="toggle-collapse-ref-card"
+                data-card-id="${escapeHtml(cardId)}"
+                aria-expanded="${isCollapsed ? 'false' : 'true'}"
+              >
+                <h3 class="sub-card-title">${escapeHtml(r.missing)}</h3>
+              </button>
+              <span class="badge badge-divider">${escapeHtml(r.category || 'Other')}</span>
+              <span class="badge mono-cell">${escapeHtml(r.amount)}</span>
+            </div>
+            ${renderRefCardControls({ cardId, isPinned, isCollapsed, extraButtonsHtml })}
+          </div>
+
+          <div class="ref-card-body">
+            <div class="sub-horiz-body ${r.notes ? '' : 'is-single-col'}">
+              <div class="sub-horiz-main">
+                <span class="sub-field-label">Substitute With</span>
+                <p class="sub-swap-text">${escapeHtml(r.substitute)}</p>
+              </div>
+              ${
+                r.notes
+                  ? `<div class="sub-notes-box">
+                      <span class="sub-field-label">Notes</span>
+                      <p>${escapeHtml(r.notes)}</p>
+                    </div>`
+                  : ''
+              }
+            </div>
+          </div>
+        </article>
+      `;
+    })
+    .join('');
 
   return `
     <div class="panel-card toolbar-card">
@@ -448,6 +496,11 @@ function renderSubstitutionsTab({
           />
         </div>
         <div class="ref-toolbar-actions">
+          ${renderBulkVisibilityButtons({
+            visibleCardIds: visibleIds,
+            collapsedSet,
+            pinnedOnly,
+          })}
           <button type="button" class="btn btn-primary" data-action="new-substitution">+ Add Substitution</button>
           <button type="button" class="btn btn-outline" data-action="reset-ref-section" data-section="substitutions">Reset Defaults</button>
         </div>
@@ -460,62 +513,11 @@ function renderSubstitutionsTab({
 
     ${editingSubId ? renderSubstitutionEditorForm(editingItem) : ''}
 
-    <div class="panel-card ref-card ${isPinned ? 'is-pinned' : ''} ${isCollapsed ? 'is-collapsed' : ''}">
-      <div class="ref-card-header">
-        <button
-          type="button"
-          class="ref-card-title-btn"
-          data-action="toggle-collapse-ref-card"
-          data-card-id="${cardId}"
-          aria-expanded="${isCollapsed ? 'false' : 'true'}"
-        >
-          <h2>Ingredient &amp; Spice Substitutions (${visibleRows.length})</h2>
-        </button>
-        ${renderRefCardControls({ cardId, isPinned, isCollapsed })}
-      </div>
-
-      <div class="ref-card-body">
-        <div class="ref-table-wrap">
-          <table class="ref-table">
-            <thead>
-              <tr>
-                <th>Missing Item</th>
-                <th>Category</th>
-                <th>Amount</th>
-                <th>Substitute With</th>
-                <th>Notes</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${
-                visibleRows.length > 0
-                  ? visibleRows
-                      .map(
-                        (r) => `<tr>
-                          <td><strong>${escapeHtml(r.missing)}</strong></td>
-                          <td><span class="badge">${escapeHtml(r.category || 'Other')}</span></td>
-                          <td class="mono-cell">${escapeHtml(r.amount)}</td>
-                          <td>${escapeHtml(r.substitute)}</td>
-                          <td>${escapeHtml(r.notes)}</td>
-                          <td class="table-actions-cell">
-                            <button type="button" class="btn btn-sm btn-outline" data-action="edit-substitution" data-sub-id="${escapeHtml(
-                              r.id
-                            )}">Edit</button>
-                            <button type="button" class="btn btn-sm btn-danger-outline" data-action="delete-substitution" data-sub-id="${escapeHtml(
-                              r.id
-                            )}">Delete</button>
-                          </td>
-                        </tr>`
-                      )
-                      .join('')
-                  : '<tr><td colspan="6" class="muted">No matching substitutions. Add a custom entry or reset defaults.</td></tr>'
-              }
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    ${
+      visibleRows.length > 0
+        ? `<div class="substitution-grid">${cardsHtml}</div>`
+        : '<div class="panel-card empty-state"><p class="muted">No matching substitutions. Adjust your search, turn off "Pinned Only", add a custom entry, or reset defaults.</p></div>'
+    }
   `;
 }
 
@@ -715,27 +717,119 @@ function renderChartsTab(chartQuery = '', pinnedSet, collapsedSet, pinnedOnly) {
   `;
 }
 
+function renderStorageEditorForm(editingItem) {
+  const isNew = !editingItem;
+  const item = editingItem || {
+    id: '',
+    categoryId: FOOD_STORAGE_CATEGORIES[0].id,
+    food: '',
+    fridge: '',
+    freezer: '',
+    pantry: '—',
+    notes: '',
+  };
+
+  const categoryOptions = FOOD_STORAGE_CATEGORIES.map(
+    (cat) =>
+      `<option value="${escapeHtml(cat.id)}" ${item.categoryId === cat.id ? 'selected' : ''}>${escapeHtml(
+        cat.label
+      )}</option>`
+  ).join('');
+
+  return `
+    <form id="ref-storage-form" class="panel-card ref-editor-card" data-storage-id="${escapeHtml(item.id)}">
+      <h2>${isNew ? 'Add Food Storage Item' : `Edit Storage Item: ${escapeHtml(item.food)}`}</h2>
+      <div class="form-grid">
+        <div class="form-field">
+          <label for="storage-food-input">Food / Ingredient (required)</label>
+          <input
+            id="storage-food-input"
+            name="food"
+            type="text"
+            required
+            value="${escapeHtml(item.food)}"
+            placeholder="e.g., Cooked Quinoa, Fresh Ginger"
+          />
+        </div>
+
+        <div class="form-field">
+          <label for="storage-category-select">Category</label>
+          <select id="storage-category-select" name="categoryId">
+            ${categoryOptions}
+          </select>
+        </div>
+
+        <div class="form-field">
+          <label for="storage-fridge-input">Refrigerator (34–40°F)</label>
+          <input
+            id="storage-fridge-input"
+            name="fridge"
+            type="text"
+            value="${escapeHtml(item.fridge)}"
+            placeholder="e.g., 3–4 days or —"
+          />
+        </div>
+
+        <div class="form-field">
+          <label for="storage-freezer-input">Freezer (0°F)</label>
+          <input
+            id="storage-freezer-input"
+            name="freezer"
+            type="text"
+            value="${escapeHtml(item.freezer)}"
+            placeholder="e.g., 3–6 months or —"
+          />
+        </div>
+
+        <div class="form-field">
+          <label for="storage-pantry-input">Pantry / Counter</label>
+          <input
+            id="storage-pantry-input"
+            name="pantry"
+            type="text"
+            value="${escapeHtml(item.pantry)}"
+            placeholder="e.g., 6 months or —"
+          />
+        </div>
+
+        <div class="form-field">
+          <label for="storage-notes-input">Storage Tips (optional)</label>
+          <input
+            id="storage-notes-input"
+            name="notes"
+            type="text"
+            value="${escapeHtml(item.notes)}"
+            placeholder="Container, wrapping, or temperature tip..."
+          />
+        </div>
+      </div>
+
+      <div class="btn-row" style="margin-top: 12px;">
+        <button type="submit" class="btn btn-primary">Save Storage Item</button>
+        <button type="button" class="btn btn-secondary" data-action="cancel-ref-edit">Cancel</button>
+      </div>
+    </form>
+  `;
+}
+
 function renderStorageTab({
-  storageCategory = 'all',
+  storageTimes = [],
   storageQuery = '',
+  editingStorageId = null,
   pinnedSet,
   collapsedSet,
   pinnedOnly,
 }) {
   const cleanQuery = String(storageQuery || '').trim().toLowerCase();
 
-  const categoryCards = FOOD_STORAGE_CATEGORIES.filter(
-    (cat) => storageCategory === 'all' || cat.id === storageCategory
-  )
-    .map((cat) => {
-      const rows = FOOD_STORAGE_TIMES.filter(
-        (item) =>
-          item.categoryId === cat.id &&
-          matchesFilter([item.food, item.fridge, item.freezer, item.pantry, item.notes], cleanQuery)
-      );
-      return { ...cat, rows };
-    })
-    .filter((cat) => !cleanQuery || cat.rows.length > 0);
+  const categoryCards = FOOD_STORAGE_CATEGORIES.map((cat) => {
+    const rows = storageTimes.filter(
+      (item) =>
+        item.categoryId === cat.id &&
+        matchesFilter([item.food, item.fridge, item.freezer, item.pantry, item.notes], cleanQuery)
+    );
+    return { ...cat, rows };
+  }).filter((cat) => cat.rows.length > 0);
 
   const visibleCards = sortPinnedFirst(
     pinnedOnly ? categoryCards.filter((c) => pinnedSet.has(c.id)) : categoryCards,
@@ -744,21 +838,10 @@ function renderStorageTab({
   );
   const visibleIds = visibleCards.map((c) => c.id);
 
-  const catButtons = [
-    `<button type="button" class="tag-pill ${
-      storageCategory === 'all' ? 'is-active' : ''
-    }" data-action="select-storage-category" data-category="all">All Categories (${
-      FOOD_STORAGE_TIMES.length
-    })</button>`,
-    ...FOOD_STORAGE_CATEGORIES.map((cat) => {
-      const count = FOOD_STORAGE_TIMES.filter((i) => i.categoryId === cat.id).length;
-      return `<button type="button" class="tag-pill ${
-        storageCategory === cat.id ? 'is-active' : ''
-      }" data-action="select-storage-category" data-category="${escapeHtml(
-        cat.id
-      )}">${escapeHtml(cat.label)} (${count})</button>`;
-    }),
-  ].join('');
+  const editingItem =
+    editingStorageId && editingStorageId !== '__new__'
+      ? storageTimes.find((s) => s.id === editingStorageId) || null
+      : null;
 
   return `
     <div class="panel-card toolbar-card">
@@ -778,13 +861,13 @@ function renderStorageTab({
             collapsedSet,
             pinnedOnly,
           })}
+          <button type="button" class="btn btn-primary" data-action="new-storage-item">+ Add Storage Item</button>
+          <button type="button" class="btn btn-outline" data-action="reset-ref-section" data-section="storageTimes">Reset Defaults</button>
         </div>
       </div>
-      <div class="tag-filter-bar" aria-label="Food storage categories">
-        <span class="tag-filter-label">Category:</span>
-        ${catButtons}
-      </div>
     </div>
+
+    ${editingStorageId ? renderStorageEditorForm(editingItem) : ''}
 
     ${
       visibleCards.length > 0
@@ -797,15 +880,17 @@ function renderStorageTab({
                 isCollapsed ? 'is-collapsed' : ''
               }">
                   <div class="ref-card-header">
-                    <button
-                      type="button"
-                      class="ref-card-title-btn"
-                      data-action="toggle-collapse-ref-card"
-                      data-card-id="${escapeHtml(cat.id)}"
-                      aria-expanded="${isCollapsed ? 'false' : 'true'}"
-                    >
-                      <h2>${escapeHtml(cat.label)} (${cat.rows.length})</h2>
-                    </button>
+                    <div class="ref-card-title-group">
+                      <button
+                        type="button"
+                        class="ref-card-title-btn"
+                        data-action="toggle-collapse-ref-card"
+                        data-card-id="${escapeHtml(cat.id)}"
+                        aria-expanded="${isCollapsed ? 'false' : 'true'}"
+                      >
+                        <h2>${escapeHtml(cat.label)} (${cat.rows.length})</h2>
+                      </button>
+                    </div>
                     ${renderRefCardControls({
                       cardId: cat.id,
                       isPinned,
@@ -822,6 +907,7 @@ function renderStorageTab({
                             <th>Freezer (0°F)</th>
                             <th>Pantry / Counter</th>
                             <th>Storage Tips</th>
+                            <th>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -833,6 +919,14 @@ function renderStorageTab({
                                 <td class="storage-duration-cell">${escapeHtml(r.freezer)}</td>
                                 <td class="storage-duration-cell">${escapeHtml(r.pantry)}</td>
                                 <td>${escapeHtml(r.notes)}</td>
+                                <td class="table-actions-cell">
+                                  <button type="button" class="btn btn-sm btn-outline" data-action="edit-storage-item" data-storage-id="${escapeHtml(
+                                    r.id
+                                  )}">Edit</button>
+                                  <button type="button" class="btn btn-sm btn-danger-outline" data-action="delete-storage-item" data-storage-id="${escapeHtml(
+                                    r.id
+                                  )}">Delete</button>
+                                </td>
                               </tr>`
                             )
                             .join('')}
@@ -844,7 +938,7 @@ function renderStorageTab({
               `;
             })
             .join('')
-        : '<div class="panel-card empty-state"><p class="muted">No matching food storage tables found. Adjust your filter or turn off "Pinned Only".</p></div>'
+        : '<div class="panel-card empty-state"><p class="muted">No matching food storage items found. Add an item, turn off "Pinned Only", or reset defaults.</p></div>'
     }
   `;
 }
@@ -970,27 +1064,33 @@ function renderTechniqueEditorForm(editingTech) {
 
 function renderTechniqueCardBody(tech) {
   return `
-    <p class="technique-summary">${escapeHtml(tech.summary)}</p>
-    <ol class="technique-steps">
-      ${(tech.steps || []).map((s) => `<li>${escapeHtml(s)}</li>`).join('')}
-    </ol>
-    ${
-      tech.visualCue
-        ? `<div class="technique-cue-box"><strong>Visual Cue:</strong> ${escapeHtml(tech.visualCue)}</div>`
-        : ''
-    }
-    ${
-      tech.commonMistake
-        ? `<div class="technique-mistake-box"><strong>Avoid:</strong> ${escapeHtml(tech.commonMistake)}</div>`
-        : ''
-    }
-    <div class="technique-keywords-row">
-      <span class="muted">Recipe auto-links:</span>
-      ${
-        (tech.keywords || []).length > 0
-          ? tech.keywords.map((kw) => `<code>${escapeHtml(kw)}</code>`).join(' ')
-          : '<span class="muted">(none)</span>'
-      }
+    <div class="technique-horiz-body">
+      <div class="technique-horiz-main">
+        <p class="technique-summary">${escapeHtml(tech.summary)}</p>
+        <ol class="technique-steps">
+          ${(tech.steps || []).map((s) => `<li>${escapeHtml(s)}</li>`).join('')}
+        </ol>
+      </div>
+      <div class="technique-horiz-side">
+        ${
+          tech.visualCue
+            ? `<div class="technique-cue-box"><strong>Visual Cue:</strong> ${escapeHtml(tech.visualCue)}</div>`
+            : ''
+        }
+        ${
+          tech.commonMistake
+            ? `<div class="technique-mistake-box"><strong>Avoid:</strong> ${escapeHtml(tech.commonMistake)}</div>`
+            : ''
+        }
+        <div class="technique-keywords-row">
+          <span class="muted">Recipe auto-links:</span>
+          ${
+            (tech.keywords || []).length > 0
+              ? tech.keywords.map((kw) => `<code>${escapeHtml(kw)}</code>`).join(' ')
+              : '<span class="muted">(none)</span>'
+          }
+        </div>
+      </div>
     </div>
   `;
 }
@@ -1099,7 +1199,16 @@ function renderTechniquesTab({
                   isCollapsed ? 'is-collapsed' : ''
                 }">
                     <div class="ref-card-header">
-                      <div class="card-badges-group">
+                      <div class="ref-card-title-group">
+                        <button
+                          type="button"
+                          class="ref-card-title-btn"
+                          data-action="toggle-collapse-ref-card"
+                          data-card-id="${escapeHtml(cardId)}"
+                          aria-expanded="${isCollapsed ? 'false' : 'true'}"
+                        >
+                          <h3 class="technique-card-title">${escapeHtml(tech.title)}</h3>
+                        </button>
                         <span class="badge badge-divider">${escapeHtml(tech.category)}</span>
                         <span class="badge">${escapeHtml(tech.time)}</span>
                       </div>
@@ -1110,15 +1219,6 @@ function renderTechniquesTab({
                         extraButtonsHtml,
                       })}
                     </div>
-                    <button
-                      type="button"
-                      class="ref-card-title-btn"
-                      data-action="toggle-collapse-ref-card"
-                      data-card-id="${escapeHtml(cardId)}"
-                      aria-expanded="${isCollapsed ? 'false' : 'true'}"
-                    >
-                      <h3 class="technique-card-title">${escapeHtml(tech.title)}</h3>
-                    </button>
                     <div class="ref-card-body">
                       ${renderTechniqueCardBody(tech)}
                     </div>
@@ -1137,7 +1237,7 @@ function renderFlavorEditorForm(editingFlavor, allFlavors) {
   const item = editingFlavor || {
     id: '',
     name: '',
-    familyId: FLAVOR_FAMILIES[0].id,
+    familyId: 'fresh-herbs',
     profile: '',
     cuisineVibe: '',
     foodPairings: {
@@ -1152,32 +1252,21 @@ function renderFlavorEditorForm(editingFlavor, allFlavors) {
   };
 
   const fp = item.foodPairings || {};
+  const allFlavorsMap = new Map((allFlavors || []).map((f) => [f.id, f]));
+  const companionNamesText = (item.pairsWellWith || [])
+    .map((entry) => allFlavorsMap.get(entry)?.name || entry)
+    .filter(Boolean)
+    .join(', ');
 
-  const familyOptions = FLAVOR_FAMILIES.map(
-    (fam) =>
-      `<option value="${escapeHtml(fam.id)}" ${item.familyId === fam.id ? 'selected' : ''}>${escapeHtml(
-        fam.name
-      )}</option>`
-  ).join('');
-
-  const selectedPairs = new Set(item.pairsWellWith || []);
-  const pairCheckboxes = (allFlavors || [])
-    .filter((other) => other.id !== item.id)
-    .map(
-      (other) => `<label class="flavor-pair-check-chip">
-        <input
-          type="checkbox"
-          name="pairsWellWith"
-          value="${escapeHtml(other.id)}"
-          ${selectedPairs.has(other.id) ? 'checked' : ''}
-        />
-        <span>${escapeHtml(other.name)}</span>
-      </label>`
-    )
-    .join('');
+  const quickAddHerbs = (allFlavors || []).filter((other) => other.id !== item.id);
 
   return `
-    <form id="ref-flavor-form" class="panel-card ref-editor-card" data-flavor-id="${escapeHtml(item.id)}">
+    <form
+      id="ref-flavor-form"
+      class="panel-card ref-editor-card"
+      data-flavor-id="${escapeHtml(item.id)}"
+      data-family-id="${escapeHtml(item.familyId || 'fresh-herbs')}"
+    >
       <h2>${isNew ? 'Add Herb / Spice Profile' : `Edit Herb Profile: ${escapeHtml(item.name)}`}</h2>
       <div class="form-grid">
         <div class="form-field">
@@ -1193,13 +1282,17 @@ function renderFlavorEditorForm(editingFlavor, allFlavors) {
         </div>
 
         <div class="form-field">
-          <label for="flavor-family-select">Flavor Family</label>
-          <select id="flavor-family-select" name="familyId">
-            ${familyOptions}
-          </select>
+          <label for="flavor-cuisine-input">Cuisines (comma-separated)</label>
+          <input
+            id="flavor-cuisine-input"
+            name="cuisineVibe"
+            type="text"
+            value="${escapeHtml(item.cuisineVibe)}"
+            placeholder="e.g., Italian, French, Mexican, Indian"
+          />
         </div>
 
-        <div class="form-field">
+        <div class="form-field form-span-2">
           <label for="flavor-profile-input">Flavor Profile</label>
           <input
             id="flavor-profile-input"
@@ -1207,17 +1300,6 @@ function renderFlavorEditorForm(editingFlavor, allFlavors) {
             type="text"
             value="${escapeHtml(item.profile)}"
             placeholder="e.g., Sweet licorice, delicate herbal"
-          />
-        </div>
-
-        <div class="form-field">
-          <label for="flavor-cuisine-input">Cuisine Vibe</label>
-          <input
-            id="flavor-cuisine-input"
-            name="cuisineVibe"
-            type="text"
-            value="${escapeHtml(item.cuisineVibe)}"
-            placeholder="e.g., French, Seafood, Roasted Chicken"
           />
         </div>
 
@@ -1276,16 +1358,31 @@ function renderFlavorEditorForm(editingFlavor, allFlavors) {
           />
         </div>
 
-        ${
-          pairCheckboxes
-            ? `<div class="form-field form-span-2">
-                <label>Companion Herbs &amp; Spices</label>
-                <div class="flavor-pair-checkboxes">
-                  ${pairCheckboxes}
-                </div>
-              </div>`
-            : ''
-        }
+        <div class="form-field form-span-2">
+          <label for="flavor-pairs-input">Companion Herbs &amp; Spices (comma-separated tags or quick-add below)</label>
+          <input
+            id="flavor-pairs-input"
+            name="pairsWellWith"
+            type="text"
+            value="${escapeHtml(companionNamesText)}"
+            placeholder="e.g., Garlic, Lemon (Juice &amp; Zest), Thyme, Chives"
+          />
+          ${
+            quickAddHerbs.length > 0
+              ? `<div class="quick-add-companion-row">
+                  <span class="tag-filter-label">Quick add:</span>
+                  ${quickAddHerbs
+                    .map(
+                      (other) =>
+                        `<button type="button" class="tag-chip" data-action="quick-add-companion-herb" data-herb-name="${escapeHtml(
+                          other.name
+                        )}">+ ${escapeHtml(other.name)}</button>`
+                    )
+                    .join('')}
+                </div>`
+              : ''
+          }
+        </div>
 
         <div class="form-field form-span-2">
           <label for="flavor-subs-input">Substitution When Out</label>
@@ -1309,7 +1406,6 @@ function renderFlavorEditorForm(editingFlavor, allFlavors) {
 
 function renderHerbProfileCard({
   item,
-  family,
   allFlavorsMap,
   isPinned,
   isCollapsed,
@@ -1325,12 +1421,13 @@ function renderHerbProfileCard({
   ].filter((r) => String(r.val || '').trim());
 
   const pairsChipsHtml = (item.pairsWellWith || [])
-    .map((pairId) => {
-      const target = allFlavorsMap.get(pairId);
-      if (!target) return '';
-      return `<button type="button" class="tag-chip" data-action="select-flavor" data-flavor-id="${escapeHtml(
-        target.id
-      )}">${escapeHtml(target.name)}</button>`;
+    .map((pairEntry) => {
+      const target = allFlavorsMap.get(pairEntry);
+      const displayLabel = target ? target.name : pairEntry;
+      if (!displayLabel) return '';
+      return `<button type="button" class="tag-chip" data-action="select-flavor" ${
+        target ? `data-flavor-id="${escapeHtml(target.id)}"` : ''
+      } data-flavor-name="${escapeHtml(displayLabel)}">${escapeHtml(displayLabel)}</button>`;
     })
     .join('');
 
@@ -1348,10 +1445,16 @@ function renderHerbProfileCard({
     isCollapsed ? 'is-collapsed' : ''
   }">
       <div class="ref-card-header">
-        <div class="card-badges-group">
-          <span class="badge" style="background: ${escapeHtml(family.color)}; color: #ffffff; border-color: transparent;">${escapeHtml(
-            family.name
-          )}</span>
+        <div class="ref-card-title-group">
+          <button
+            type="button"
+            class="ref-card-title-btn"
+            data-action="toggle-collapse-ref-card"
+            data-card-id="${escapeHtml(cardId)}"
+            aria-expanded="${isCollapsed ? 'false' : 'true'}"
+          >
+            <h3 class="herb-profile-title">${escapeHtml(item.name)}</h3>
+          </button>
           ${
             item.cuisineVibe
               ? `<span class="badge">${escapeHtml(item.cuisineVibe)}</span>`
@@ -1361,69 +1464,62 @@ function renderHerbProfileCard({
         ${renderRefCardControls({ cardId, isPinned, isCollapsed, extraButtonsHtml })}
       </div>
 
-      <button
-        type="button"
-        class="ref-card-title-btn"
-        data-action="toggle-collapse-ref-card"
-        data-card-id="${escapeHtml(cardId)}"
-        aria-expanded="${isCollapsed ? 'false' : 'true'}"
-      >
-        <h3 class="herb-profile-title">${escapeHtml(item.name)}</h3>
-      </button>
-
       <div class="ref-card-body">
-        ${
-          (item.bestWith || []).length > 0
-            ? `<div class="flavor-chip-row herb-best-with-row">
-                ${item.bestWith.map((dish) => `<span class="badge badge-accent-soft">${escapeHtml(dish)}</span>`).join('')}
-              </div>`
-            : ''
-        }
+        <div class="herb-horiz-body">
+          <div class="herb-horiz-main">
+            ${
+              (item.bestWith || []).length > 0
+                ? `<div class="flavor-chip-row herb-best-with-row">
+                    ${item.bestWith.map((dish) => `<span class="badge badge-accent-soft">${escapeHtml(dish)}</span>`).join('')}
+                  </div>`
+                : ''
+            }
+            ${
+              foodRows.length > 0
+                ? `<div class="herb-food-pairings-grid">
+                    ${foodRows
+                      .map(
+                        (row) => `
+                          <div class="herb-food-row">
+                            <span class="herb-food-cat">${escapeHtml(row.label)}</span>
+                            <p class="herb-food-items">${escapeHtml(row.val)}</p>
+                          </div>
+                        `
+                      )
+                      .join('')}
+                  </div>`
+                : ''
+            }
+          </div>
 
-        ${
-          foodRows.length > 0
-            ? `<div class="herb-food-pairings-grid">
-                ${foodRows
-                  .map(
-                    (row) => `
-                      <div class="herb-food-row">
-                        <span class="herb-food-cat">${escapeHtml(row.label)}</span>
-                        <p class="herb-food-items">${escapeHtml(row.val)}</p>
-                      </div>
-                    `
-                  )
-                  .join('')}
-              </div>`
-            : ''
-        }
-
-        ${
-          item.profile
-            ? `<p class="flavor-profile-text"><strong>Flavor Profile:</strong> ${escapeHtml(
-                item.profile
-              )}</p>`
-            : ''
-        }
-
-        ${
-          pairsChipsHtml
-            ? `<div class="flavor-section">
-                <h4>Pairs Well With</h4>
-                <div class="flavor-chip-row">
-                  ${pairsChipsHtml}
-                </div>
-              </div>`
-            : ''
-        }
-
-        ${
-          item.substitutes
-            ? `<div class="flavor-sub-box">
-                <h4>Out of ${escapeHtml(item.name)}? Try Instead</h4>
-                <p>${escapeHtml(item.substitutes)}</p>
-              </div>`
-            : ''
-        }
+          <div class="herb-horiz-side">
+            ${
+              item.profile
+                ? `<p class="flavor-profile-text"><strong>Flavor Profile:</strong> ${escapeHtml(
+                    item.profile
+                  )}</p>`
+                : ''
+            }
+            ${
+              pairsChipsHtml
+                ? `<div class="flavor-section">
+                    <h4>Pairs Well With</h4>
+                    <div class="flavor-chip-row">
+                      ${pairsChipsHtml}
+                    </div>
+                  </div>`
+                : ''
+            }
+            ${
+              item.substitutes
+                ? `<div class="flavor-sub-box">
+                    <h4>Out of ${escapeHtml(item.name)}? Try Instead</h4>
+                    <p>${escapeHtml(item.substitutes)}</p>
+                  </div>`
+                : ''
+            }
+          </div>
+        </div>
       </div>
     </article>
   `;
@@ -1431,8 +1527,7 @@ function renderHerbProfileCard({
 
 function renderHerbProfilesTab({
   flavors = [],
-  flavorFamily = 'all',
-  herbFoodFilter = 'all',
+  herbCuisine = 'all',
   flavorQuery = '',
   editingFlavorId = null,
   pinnedSet,
@@ -1444,24 +1539,37 @@ function renderHerbProfilesTab({
       ? flavors.find((f) => f.id === editingFlavorId) || null
       : null;
 
-  const familyMap = new Map(FLAVOR_FAMILIES.map((fam) => [fam.id, fam]));
   const allFlavorsMap = new Map(flavors.map((f) => [f.id, f]));
   const cleanQuery = String(flavorQuery || '').trim().toLowerCase();
+
+  // Extract distinct cuisine tags for filter pills
+  const cuisineCounts = new Map();
+  for (const item of flavors) {
+    const tokens = String(item.cuisineVibe || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const tok of tokens) {
+      cuisineCounts.set(tok, (cuisineCounts.get(tok) || 0) + 1);
+    }
+  }
+  const topCuisines = Array.from(cuisineCounts.entries())
+    .filter(([name, count]) => count >= 2 || name === herbCuisine)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 12);
 
   const filtered = flavors.filter((item) => {
     const cardId = `herb-${item.id}`;
     if (pinnedOnly && !pinnedSet.has(cardId)) return false;
-    if (flavorFamily && flavorFamily !== 'all' && item.familyId !== flavorFamily) {
-      return false;
-    }
-    if (herbFoodFilter && herbFoodFilter !== 'all') {
-      const val = String(item.foodPairings?.[herbFoodFilter] || '').trim();
-      if (!val) return false;
+    if (herbCuisine && herbCuisine !== 'all') {
+      const targetCuisine = herbCuisine.toLowerCase();
+      const itemCuisines = String(item.cuisineVibe || '').toLowerCase();
+      if (!itemCuisines.includes(targetCuisine)) return false;
     }
     if (!cleanQuery) return true;
     const fp = item.foodPairings || {};
     const companionNames = (item.pairsWellWith || [])
-      .map((pid) => allFlavorsMap.get(pid)?.name || '')
+      .map((pid) => allFlavorsMap.get(pid)?.name || pid)
       .filter(Boolean);
     const hay = [
       item.name,
@@ -1483,36 +1591,29 @@ function renderHerbProfilesTab({
   const visible = sortPinnedFirst(filtered, (f) => `herb-${f.id}`, pinnedSet);
   const visibleIds = visible.map((f) => `herb-${f.id}`);
 
-  const familyButtons = [
+  const cuisineButtons = [
     `<button type="button" class="tag-pill ${
-      flavorFamily === 'all' ? 'is-active' : ''
-    }" data-action="select-flavor-family" data-family-id="all">All (${flavors.length})</button>`,
-    ...FLAVOR_FAMILIES.map((fam) => {
-      const count = flavors.filter((f) => f.familyId === fam.id).length;
-      return `<button type="button" class="tag-pill ${
-        flavorFamily === fam.id ? 'is-active' : ''
-      }" data-action="select-flavor-family" data-family-id="${escapeHtml(fam.id)}">${escapeHtml(
-        fam.name
-      )} (${count})</button>`;
-    }),
+      herbCuisine === 'all' ? 'is-active' : ''
+    }" data-action="select-herb-cuisine" data-cuisine="all">All (${flavors.length})</button>`,
+    ...topCuisines.map(
+      ([name, count]) => `<button type="button" class="tag-pill ${
+        herbCuisine === name ? 'is-active' : ''
+      }" data-action="select-herb-cuisine" data-cuisine="${escapeHtml(name)}">${escapeHtml(
+        name
+      )} (${count})</button>`
+    ),
   ].join('');
-
-  const foodFilterButtons = HERB_FOOD_FILTERS.map(
-    (f) => `<button type="button" class="tag-pill ${
-      herbFoodFilter === f.id ? 'is-active' : ''
-    }" data-action="select-herb-food-filter" data-food-filter="${f.id}">${escapeHtml(f.label)}</button>`
-  ).join('');
 
   return `
     <div class="panel-card toolbar-card">
       <div class="collection-toolbar">
         <div class="toolbar-search">
-          <label for="reference-flavor-search" class="sr-only">Search herbs by food or profile</label>
+          <label for="reference-flavor-search" class="sr-only">Search herbs by food, cuisine, or profile</label>
           <input
             id="reference-flavor-search"
             type="search"
             value="${escapeHtml(flavorQuery)}"
-            placeholder="Search by food or herb (e.g., salmon, potatoes, chicken, basil, cinnamon)..."
+            placeholder="Search by food, cuisine, or herb (e.g., salmon, potatoes, Italian, basil, cinnamon)..."
           />
         </div>
         <div class="ref-toolbar-actions">
@@ -1525,17 +1626,10 @@ function renderHerbProfilesTab({
           <button type="button" class="btn btn-outline" data-action="reset-ref-section" data-section="flavors">Reset Defaults</button>
         </div>
       </div>
-      <div class="tag-filter-bar" aria-label="Flavor families">
-        <span class="tag-filter-label">Family:</span>
-        ${familyButtons}
+      <div class="tag-filter-bar" aria-label="Filter herbs by cuisine">
+        <span class="tag-filter-label">Cuisine:</span>
+        ${cuisineButtons}
       </div>
-      <div class="tag-filter-bar" aria-label="Food pairing focus" style="margin-top: 6px;">
-        <span class="tag-filter-label">Food Type:</span>
-        ${foodFilterButtons}
-      </div>
-      <p class="muted" style="margin: 8px 0 0; font-size: 0.85rem;">
-        Food pairings informed by the UMaine Extension Spice &amp; Herb Pairing Guide (#4365). Showing ${visible.length} of ${flavors.length} herb &amp; spice profiles.
-      </p>
     </div>
 
     ${editingFlavorId ? renderFlavorEditorForm(editingFlavor, flavors) : ''}
@@ -1547,7 +1641,6 @@ function renderHerbProfilesTab({
               .map((item) =>
                 renderHerbProfileCard({
                   item,
-                  family: familyMap.get(item.familyId) || FLAVOR_FAMILIES[0],
                   allFlavorsMap,
                   isPinned: pinnedSet.has(`herb-${item.id}`),
                   isCollapsed: collapsedSet.has(`herb-${item.id}`),
@@ -1571,13 +1664,12 @@ export function renderReferenceView({
   subQuery = '',
   editingSubId = null,
   chartQuery = '',
-  storageCategory = 'all',
   storageQuery = '',
+  editingStorageId = null,
   techniqueCategory = 'all',
   techniqueQuery = '',
   editingTechniqueId = null,
-  flavorFamily = 'all',
-  herbFoodFilter = 'all',
+  herbCuisine = 'all',
   flavorQuery = '',
   editingFlavorId = null,
   pinnedCards,
@@ -1607,13 +1699,15 @@ export function renderReferenceView({
       editingSubId,
       pinnedSet,
       collapsedSet,
+      pinnedOnly,
     });
   } else if (activeTab === 'charts') {
     bodyHtml = renderChartsTab(chartQuery, pinnedSet, collapsedSet, pinnedOnly);
   } else if (activeTab === 'storage') {
     bodyHtml = renderStorageTab({
-      storageCategory,
+      storageTimes: data.storageTimes || [],
       storageQuery,
+      editingStorageId,
       pinnedSet,
       collapsedSet,
       pinnedOnly,
@@ -1631,8 +1725,7 @@ export function renderReferenceView({
   } else if (activeTab === 'flavor') {
     bodyHtml = renderHerbProfilesTab({
       flavors: data.flavors || [],
-      flavorFamily,
-      herbFoodFilter,
+      herbCuisine,
       flavorQuery,
       editingFlavorId,
       pinnedSet,

@@ -1573,8 +1573,8 @@ textarea {
 
 .technique-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 14px;
+  grid-template-columns: 1fr;
+  gap: 10px;
 }
 
 .technique-card {
@@ -1583,8 +1583,16 @@ textarea {
   margin-bottom: 0;
 }
 
-.technique-card-top {
-  margin-bottom: 8px;
+.technique-horiz-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.95fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.technique-horiz-side {
+  display: grid;
+  gap: 8px;
 }
 
 .technique-keywords-row {
@@ -1719,14 +1727,23 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+}
+
+.ref-card-title-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 220px;
 }
 
 .ref-card-title-btn {
   display: block;
-  width: 100%;
+  width: auto;
   text-align: left;
   background: transparent;
   border: 0;
@@ -1741,13 +1758,12 @@ textarea {
   color: var(--primary);
 }
 
-.ref-card-header .ref-card-title-btn {
-  width: auto;
-  flex: 1;
-  min-width: 180px;
+.ref-card-title-group .ref-card-title-btn {
+  margin-right: 4px;
 }
 
-.ref-card-header h2 {
+.ref-card-header h2,
+.ref-card-header h3 {
   margin: 0;
 }
 
@@ -1771,22 +1787,87 @@ textarea {
 
 .herb-profile-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 14px;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.substitution-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.sub-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.sub-card-title {
+  margin: 0;
+  font-size: 17px;
+}
+
+.sub-horiz-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(240px, 1fr);
+  gap: 16px;
   align-items: start;
 }
 
-.herb-profile-card .ref-card-title-btn {
-  margin-bottom: 8px;
+.sub-horiz-body.is-single-col {
+  grid-template-columns: 1fr;
 }
 
-.herb-profile-card.is-collapsed .ref-card-title-btn {
-  margin-bottom: 0;
+.sub-field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.sub-swap-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.sub-notes-box {
+  padding: 8px 11px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.sub-notes-box p {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.herb-profile-card {
+  display: flex;
+  flex-direction: column;
 }
 
 .herb-profile-title {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
+}
+
+.herb-horiz-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.95fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.herb-horiz-side {
+  display: grid;
+  gap: 10px;
 }
 
 .herb-best-with-row {
@@ -1802,7 +1883,6 @@ textarea {
 .herb-food-pairings-grid {
   display: grid;
   gap: 6px;
-  margin-bottom: 12px;
   padding: 9px 11px;
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -1840,12 +1920,8 @@ textarea {
 }
 
 .flavor-profile-text {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 13.5px;
-}
-
-.flavor-section {
-  margin-bottom: 12px;
 }
 
 .flavor-section h3,
@@ -1894,38 +1970,19 @@ textarea {
   gap: 6px;
 }
 
-.flavor-pair-checkboxes {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+.quick-add-companion-row {
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  padding: 10px;
-  background: var(--bg-input);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  max-height: 220px;
-  overflow-y: auto;
-}
-
-.flavor-pair-check-chip {
-  display: inline-flex;
+  margin-top: 8px;
   align-items: center;
-  gap: 6px;
-  margin: 0;
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--text-main);
-  cursor: pointer;
-}
-
-.flavor-pair-check-chip input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--primary);
 }
 
 @media (max-width: 820px) {
   .converter-grid,
-  .herb-profile-grid {
+  .herb-horiz-body,
+  .technique-horiz-body,
+  .sub-horiz-body {
     grid-template-columns: 1fr;
   }
 }

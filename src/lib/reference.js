@@ -1,6 +1,8 @@
 import {
   FLAVOR_FAMILIES,
   FLAVOR_PAIRINGS,
+  FOOD_STORAGE_CATEGORIES,
+  FOOD_STORAGE_TIMES,
   SUBSTITUTIONS,
   TECHNIQUE_CARDS,
 } from '../data/referenceGuide.js';
@@ -85,6 +87,29 @@ export function normalizeFlavor(input, index = 0) {
   };
 }
 
+const VALID_STORAGE_CAT_IDS = new Set(FOOD_STORAGE_CATEGORIES.map((c) => c.id));
+
+/**
+ * Normalizes a food storage duration row (`{ id, categoryId, food, fridge, freezer, pantry, notes }`).
+ */
+export function normalizeStorageTime(input, index = 0) {
+  const food = String(input?.food || '').trim() || `Food Item ${index + 1}`;
+  const id = String(input?.id || '').trim() || `st-${slugId(food, `item-${index + 1}`)}`;
+  const rawCat = String(input?.categoryId || '').trim();
+  const categoryId = VALID_STORAGE_CAT_IDS.has(rawCat)
+    ? rawCat
+    : FOOD_STORAGE_CATEGORIES[FOOD_STORAGE_CATEGORIES.length - 1].id;
+  return {
+    id,
+    categoryId,
+    food,
+    fridge: String(input?.fridge || '').trim() || '—',
+    freezer: String(input?.freezer || '').trim() || '—',
+    pantry: String(input?.pantry || '').trim() || '—',
+    notes: String(input?.notes || '').trim(),
+  };
+}
+
 /**
  * Returns a fresh clone of the default Front Pocket reference data.
  */
@@ -93,6 +118,7 @@ export function getDefaultReferenceData() {
     substitutions: SUBSTITUTIONS.map((s, idx) => normalizeSubstitution(s, idx)),
     techniques: TECHNIQUE_CARDS.map((t, idx) => normalizeTechnique(t, idx)),
     flavors: FLAVOR_PAIRINGS.map((f, idx) => normalizeFlavor(f, idx)),
+    storageTimes: FOOD_STORAGE_TIMES.map((st, idx) => normalizeStorageTime(st, idx)),
     updatedMs: 0,
   };
 }
@@ -111,12 +137,16 @@ export function normalizeReferenceData(input) {
   const flavors = Array.isArray(input?.flavors)
     ? input.flavors.map((f, idx) => normalizeFlavor(f, idx))
     : defaults.flavors;
+  const storageTimes = Array.isArray(input?.storageTimes)
+    ? input.storageTimes.map((st, idx) => normalizeStorageTime(st, idx))
+    : defaults.storageTimes;
   const updatedMsNum = Number(input?.updatedMs || 0);
 
   return {
     substitutions,
     techniques,
     flavors,
+    storageTimes,
     updatedMs: Number.isFinite(updatedMsNum) && updatedMsNum >= 0 ? updatedMsNum : 0,
   };
 }
