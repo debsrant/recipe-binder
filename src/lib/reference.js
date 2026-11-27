@@ -66,12 +66,19 @@ export function normalizeFlavor(input, index = 0) {
   const id = String(input?.id || '').trim() || slugId(name, `flavor-${index + 1}`);
   const rawFamily = String(input?.familyId || '').trim();
   const familyId = VALID_FAMILY_IDS.has(rawFamily) ? rawFamily : FLAVOR_FAMILIES[0].id;
+  const rawFp = input?.foodPairings && typeof input.foodPairings === 'object' ? input.foodPairings : {};
   return {
     id,
     name,
     familyId,
     profile: String(input?.profile || '').trim(),
     cuisineVibe: String(input?.cuisineVibe || '').trim(),
+    foodPairings: {
+      meats: String(rawFp.meats || '').trim(),
+      vegetables: String(rawFp.vegetables || '').trim(),
+      soupsSalads: String(rawFp.soupsSalads || '').trim(),
+      appetizersBaking: String(rawFp.appetizersBaking || '').trim(),
+    },
     bestWith: normalizeStringArray(input?.bestWith, /[,;\r\n]/),
     pairsWellWith: normalizeStringArray(input?.pairsWellWith, /[,;\r\n]/),
     substitutes: String(input?.substitutes || '').trim(),

@@ -127,6 +127,24 @@ function savePref(key, value) {
   }
 }
 
+function readSavedIdSet(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter(Boolean) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveIdSet(key, set) {
+  try {
+    localStorage.setItem(key, JSON.stringify(Array.from(set || [])));
+  } catch {
+    // Ignore storage errors in restricted browsing contexts
+  }
+}
+
 const state = {
   ready: false,
   view: 'collection', // 'collection' | 'detail' | 'editor' | 'import' | 'reference' | 'dividers' | 'sync'
@@ -178,14 +196,21 @@ const state = {
     toUnit: 'g',
     ingredientId: 'ap-flour',
   },
+  refPinnedCards: readSavedIdSet(PREF_KEYS.refPinnedCards),
+  refCollapsedCards: readSavedIdSet(PREF_KEYS.refCollapsedCards),
+  refPinnedOnly: false,
   refSubCategory: 'all',
   refSubQuery: '',
   editingSubId: null,
   refChartQuery: '',
+  refStorageCategory: 'all',
+  refStorageQuery: '',
   refTechniqueCategory: 'all',
   refTechniqueQuery: '',
   editingTechniqueId: null,
-  selectedFlavorId: 'rosemary',
+  refFlavorFamily: 'all',
+  refHerbFoodFilter: 'all',
+  refFlavorQuery: '',
   editingFlavorId: null,
   checkedIngredients: new Set(),
   checkedSteps: new Set(),
@@ -422,11 +447,18 @@ function renderMainContent() {
       subQuery: state.refSubQuery,
       editingSubId: state.editingSubId,
       chartQuery: state.refChartQuery,
+      storageCategory: state.refStorageCategory,
+      storageQuery: state.refStorageQuery,
       techniqueCategory: state.refTechniqueCategory,
       techniqueQuery: state.refTechniqueQuery,
       editingTechniqueId: state.editingTechniqueId,
-      selectedFlavorId: state.selectedFlavorId,
+      flavorFamily: state.refFlavorFamily,
+      herbFoodFilter: state.refHerbFoodFilter,
+      flavorQuery: state.refFlavorQuery,
       editingFlavorId: state.editingFlavorId,
+      pinnedCards: state.refPinnedCards,
+      collapsedCards: state.refCollapsedCards,
+      pinnedOnly: state.refPinnedOnly,
     });
   }
 
@@ -465,7 +497,9 @@ const PRESERVED_SEARCH_IDS = new Set([
   'matcher-ingredient-search',
   'reference-sub-search',
   'reference-chart-search',
+  'reference-storage-search',
   'reference-technique-search',
+  'reference-flavor-search',
 ]);
 
 function render() {
@@ -895,19 +929,83 @@ async function handleAction(action, target) {
   }
 
   if (action === 'select-flavor-family') {
-    const familyId = target.dataset.familyId || '';
-    const firstMatch = (state.referenceData.flavors || []).find((p) => p.familyId === familyId);
-    if (firstMatch) {
-      state.selectedFlavorId = firstMatch.id;
-      render();
+    state.refFlavorFamily = target.dataset.familyId || 'all';
+    render();
+    return;
+  }
+
+  if (action === 'select-herb-food-filter') {
+    state.refHerbFoodFilter = target.dataset.foodFilter || 'all';
+    render();
+    return;
+  }
+
+  if (action === 'select-storage-category') {
+    state.refStorageCategory = target.dataset.category || 'all';
+    render();
+    return;
+  }
+
+  if (action === 'toggle-pin-ref-card') {
+    const cardId = target.dataset.cardId || '';
+    if (!cardId) return;
+    if (state.refPinnedCards.has(cardId)) {
+      state.refPinnedCards.delete(cardId);
+    } else {
+      state.refPinnedCards.add(cardId);
     }
+    saveIdSet(PREF_KEYS.refPinnedCards, state.refPinnedCards);
+    render();
+    return;
+  }
+
+  if (action === 'toggle-collapse-ref-card') {
+    const cardId = target.dataset.cardId || '';
+    if (!cardId) return;
+    if (state.refCollapsedCards.has(cardId)) {
+      state.refCollapsedCards.delete(cardId);
+    } else {
+      state.refCollapsedCards.add(cardId);
+    }
+    saveIdSet(PREF_KEYS.refCollapsedCards, state.refCollapsedCards);
+    render();
+    return;
+  }
+
+  if (action === 'toggle-collapse-all-ref') {
+    const ids = String(target.dataset.cardIds || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (ids.length === 0) return;
+    const allCollapsed = ids.every((id) => state.refCollapsedCards.has(id));
+    for (const id of ids) {
+      if (allCollapsed) {
+        state.refCollapsedCards.delete(id);
+      } else {
+        state.refCollapsedCards.add(id);
+      }
+    }
+    saveIdSet(PREF_KEYS.refCollapsedCards, state.refCollapsedCards);
+    render();
+    return;
+  }
+
+  if (action === 'toggle-ref-pinned-only') {
+    state.refPinnedOnly = !state.refPinnedOnly;
+    render();
     return;
   }
 
   if (action === 'select-flavor') {
     const flavorId = target.dataset.flavorId || '';
-    if (flavorId) {
-      state.selectedFlavorId = flavorId;
+    const targetHerb = (state.referenceData.flavors || []).find((f) => f.id === flavorId);
+    if (targetHerb) {
+      state.refFlavorFamily = 'all';
+      state.refHerbFoodFilter = 'all';
+      state.refFlavorQuery = targetHerb.name;
+      state.refCollapsedCards.delete(`herb-${targetHerb.id}`);
+      saveIdSet(PREF_KEYS.refCollapsedCards, state.refCollapsedCards);
       render();
     }
     return;
@@ -989,13 +1087,10 @@ async function handleAction(action, target) {
     const id = target.dataset.flavorId || '';
     const flavor = (state.referenceData.flavors || []).find((f) => f.id === id);
     if (!flavor) return;
-    if (!window.confirm(`Delete "${flavor.name}" from the Flavor Pairing Wheel?`)) return;
+    if (!window.confirm(`Delete "${flavor.name}" from Herb & Spice Profiles?`)) return;
     const nextFlavors = deleteFlavorItem(state.referenceData.flavors, id);
     if (state.editingFlavorId === id) state.editingFlavorId = null;
-    if (state.selectedFlavorId === id) {
-      state.selectedFlavorId = nextFlavors[0]?.id || '';
-    }
-    await persistReferencePatch({ flavors: nextFlavors }, `Deleted "${flavor.name}" from Flavor Wheel.`);
+    await persistReferencePatch({ flavors: nextFlavors }, `Deleted "${flavor.name}" from Herb & Spice Profiles.`);
     return;
   }
 
@@ -1015,10 +1110,12 @@ async function handleAction(action, target) {
       return;
     }
     if (section === 'flavors') {
-      if (!window.confirm('Restore all default Flavor Wheel herbs and spices?')) return;
+      if (!window.confirm('Restore all default Herb & Spice Profiles?')) return;
       state.editingFlavorId = null;
-      state.selectedFlavorId = defaults.flavors[0]?.id || 'rosemary';
-      await persistReferencePatch({ flavors: defaults.flavors }, 'Restored default Flavor Wheel entries.');
+      state.refFlavorFamily = 'all';
+      state.refHerbFoodFilter = 'all';
+      state.refFlavorQuery = '';
+      await persistReferencePatch({ flavors: defaults.flavors }, 'Restored default Herb & Spice Profiles.');
       return;
     }
     return;
@@ -1890,8 +1987,18 @@ document.addEventListener('input', (event) => {
     render();
     return;
   }
+  if (target.id === 'reference-storage-search') {
+    state.refStorageQuery = target.value;
+    render();
+    return;
+  }
   if (target.id === 'reference-technique-search') {
     state.refTechniqueQuery = target.value;
+    render();
+    return;
+  }
+  if (target.id === 'reference-flavor-search') {
+    state.refFlavorQuery = target.value;
     render();
     return;
   }
@@ -2236,6 +2343,12 @@ document.addEventListener('submit', async (event) => {
       familyId: fd.get('familyId'),
       profile: fd.get('profile'),
       cuisineVibe: fd.get('cuisineVibe'),
+      foodPairings: {
+        meats: fd.get('foodMeats'),
+        vegetables: fd.get('foodVegetables'),
+        soupsSalads: fd.get('foodSoupsSalads'),
+        appetizersBaking: fd.get('foodAppetizersBaking'),
+      },
       bestWith: fd.get('bestWith'),
       pairsWellWith: fd.getAll('pairsWellWith'),
       substitutes: fd.get('substitutes'),
@@ -2245,8 +2358,7 @@ document.addEventListener('submit', async (event) => {
     }
     const nextFlavors = upsertReferenceItem(list, candidate);
     state.editingFlavorId = null;
-    state.selectedFlavorId = candidate.id;
-    await persistReferencePatch({ flavors: nextFlavors }, `Saved "${candidate.name}" to Flavor Wheel.`);
+    await persistReferencePatch({ flavors: nextFlavors }, `Saved "${candidate.name}" to Herb & Spice Profiles.`);
     return;
   }
 

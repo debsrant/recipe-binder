@@ -33,6 +33,8 @@ import { createZipBytes } from '../src/lib/zip.js';
 import {
   FLAVOR_FAMILIES,
   FLAVOR_PAIRINGS,
+  FOOD_STORAGE_CATEGORIES,
+  FOOD_STORAGE_TIMES,
   GRAIN_RATIOS,
   MEAT_TEMPERATURES,
   OIL_SMOKE_POINTS,
@@ -896,18 +898,34 @@ test('findMatchingTechniques and renderLinkedStepHtml link culinary keywords saf
   assert.ok(html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
 });
 
-test('referenceGuide datasets are populated with valid flavor pairing cross-references', () => {
+test('referenceGuide datasets are populated with valid herb food pairings and storage times', () => {
   assert.ok(MEAT_TEMPERATURES.length >= 10);
   assert.ok(GRAIN_RATIOS.length >= 10);
   assert.ok(OIL_SMOKE_POINTS.length >= 8);
   assert.ok(SUBSTITUTIONS.length >= 12);
   assert.ok(TECHNIQUE_CARDS.length >= 10);
   assert.equal(FLAVOR_FAMILIES.length, 5);
+  assert.equal(FOOD_STORAGE_CATEGORIES.length, 6);
+  assert.ok(FOOD_STORAGE_TIMES.length >= 25);
+
+  const storageCatIds = new Set(FOOD_STORAGE_CATEGORIES.map((c) => c.id));
+  for (const row of FOOD_STORAGE_TIMES) {
+    assert.ok(storageCatIds.has(row.categoryId), `Unknown storage category ${row.categoryId}`);
+    assert.ok(row.food && row.fridge && row.freezer);
+  }
 
   const familyIds = new Set(FLAVOR_FAMILIES.map((f) => f.id));
   const flavorIds = new Set(FLAVOR_PAIRINGS.map((p) => p.id));
+  for (const expectedId of ['marjoram', 'tarragon', 'cloves', 'curry-powder']) {
+    assert.ok(flavorIds.has(expectedId), `Missing expected herb/spice ${expectedId}`);
+  }
   for (const item of FLAVOR_PAIRINGS) {
     assert.ok(familyIds.has(item.familyId));
+    assert.ok(item.foodPairings && typeof item.foodPairings === 'object');
+    assert.ok(item.foodPairings.meats, `Missing meats foodPairing on ${item.id}`);
+    assert.ok(item.foodPairings.vegetables, `Missing vegetables foodPairing on ${item.id}`);
+    assert.ok(item.foodPairings.soupsSalads, `Missing soupsSalads foodPairing on ${item.id}`);
+    assert.ok(item.foodPairings.appetizersBaking, `Missing appetizersBaking foodPairing on ${item.id}`);
     for (const paired of item.pairsWellWith) {
       assert.ok(flavorIds.has(paired), `Unknown pairing ${paired} on ${item.id}`);
     }
@@ -969,10 +987,18 @@ test('referenceData includes spice substitutions and supports upsert, delete, pr
   const customFlavor = normalizeFlavor({
     name: 'Tarragon',
     familyId: 'fresh-herbs',
+    foodPairings: {
+      meats: 'Chicken, Salmon',
+      vegetables: 'Asparagus, Carrots',
+      soupsSalads: 'Bearnaise',
+      appetizersBaking: 'Deviled eggs',
+    },
     bestWith: ['Chicken', 'Eggs'],
   });
   assert.equal(customFlavor.id, 'tarragon');
   assert.deepEqual(customFlavor.bestWith, ['Chicken', 'Eggs']);
+  assert.equal(customFlavor.foodPairings.meats, 'Chicken, Salmon');
+  assert.equal(customFlavor.foodPairings.appetizersBaking, 'Deviled eggs');
 });
 
 test('servingSize persists across normalizeRecipe, search, and Markdown round-trip', () => {

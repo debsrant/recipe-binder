@@ -1,5 +1,7 @@
 import {
   FLAVOR_FAMILIES,
+  FOOD_STORAGE_CATEGORIES,
+  FOOD_STORAGE_TIMES,
   GRAIN_RATIOS,
   MEAT_TEMPERATURES,
   OIL_SMOKE_POINTS,
@@ -23,17 +25,87 @@ const REF_TABS = [
   { id: 'converter', label: 'Unit Converter' },
   { id: 'substitutions', label: 'Substitutions' },
   { id: 'charts', label: 'Reference Charts' },
+  { id: 'storage', label: 'Food Storage Times' },
   { id: 'techniques', label: 'Technique Cards' },
-  { id: 'flavor', label: 'Flavor Pairing Wheel' },
+  { id: 'flavor', label: 'Herb & Spice Profiles' },
 ];
 
 const DEFAULT_TECHNIQUE_CATEGORIES = ['Heat & Sauces', 'Baking & Dairy', 'Knife Skills', 'Prep'];
+
+const HERB_FOOD_FILTERS = [
+  { id: 'all', label: 'All Foods' },
+  { id: 'meats', label: 'Meats & Seafood' },
+  { id: 'vegetables', label: 'Vegetables' },
+  { id: 'soupsSalads', label: 'Soups, Salads & Sauces' },
+  { id: 'appetizersBaking', label: 'Appetizers & Baking' },
+];
 
 function getModeUnitOptions(mode) {
   if (mode === 'volume') return Object.values(VOLUME_UNITS);
   if (mode === 'weight') return Object.values(WEIGHT_UNITS);
   if (mode === 'temperature') return Object.values(TEMP_UNITS);
   return [...Object.values(VOLUME_UNITS), ...Object.values(WEIGHT_UNITS)];
+}
+
+function asIdSet(value) {
+  if (value instanceof Set) return value;
+  return new Set(Array.isArray(value) ? value : []);
+}
+
+function sortPinnedFirst(items, getCardId, pinnedSet) {
+  return [...items].sort((a, b) => {
+    const aPinned = pinnedSet.has(getCardId(a));
+    const bPinned = pinnedSet.has(getCardId(b));
+    if (aPinned === bPinned) return 0;
+    return aPinned ? -1 : 1;
+  });
+}
+
+function renderRefCardControls({ cardId, isPinned, isCollapsed, extraButtonsHtml = '' }) {
+  return `
+    <div class="ref-card-controls">
+      <button
+        type="button"
+        class="btn btn-sm btn-outline ref-pin-btn ${isPinned ? 'is-pinned' : ''}"
+        data-action="toggle-pin-ref-card"
+        data-card-id="${escapeHtml(cardId)}"
+        aria-pressed="${isPinned ? 'true' : 'false'}"
+        title="${isPinned ? 'Unpin card' : 'Pin card to top'}"
+      >${isPinned ? 'Pinned' : 'Pin'}</button>
+      ${extraButtonsHtml}
+      <button
+        type="button"
+        class="btn btn-sm btn-outline ref-collapse-btn"
+        data-action="toggle-collapse-ref-card"
+        data-card-id="${escapeHtml(cardId)}"
+        aria-expanded="${isCollapsed ? 'false' : 'true'}"
+        title="${isCollapsed ? 'Expand card' : 'Collapse card'}"
+      >${isCollapsed ? 'Expand ▾' : 'Collapse ▴'}</button>
+    </div>
+  `;
+}
+
+function renderBulkVisibilityButtons({ visibleCardIds, collapsedSet, pinnedOnly }) {
+  const allCollapsed =
+    visibleCardIds.length > 0 && visibleCardIds.every((id) => collapsedSet.has(id));
+  return `
+    <button
+      type="button"
+      class="btn btn-sm ${pinnedOnly ? 'btn-primary' : 'btn-outline'}"
+      data-action="toggle-ref-pinned-only"
+      aria-pressed="${pinnedOnly ? 'true' : 'false'}"
+    >${pinnedOnly ? 'Pinned Only: On' : 'Pinned Only'}</button>
+    ${
+      visibleCardIds.length > 0
+        ? `<button
+            type="button"
+            class="btn btn-sm btn-outline"
+            data-action="toggle-collapse-all-ref"
+            data-card-ids="${escapeHtml(visibleCardIds.join(','))}"
+          >${allCollapsed ? 'Expand All' : 'Collapse All'}</button>`
+        : ''
+    }
+  `;
 }
 
 /**
@@ -102,13 +174,17 @@ export function renderConverterResultHtml(converterState) {
   return `${mainBoxHtml}${equivHtml}${ovenPresetsHtml}`;
 }
 
-function renderConverterTab(converterState) {
+function renderConverterTab(converterState, pinnedSet, collapsedSet) {
   const mode = converterState?.mode || 'volume-weight';
   const unitsList = getModeUnitOptions(mode);
   const fromUnit = converterState?.fromUnit || 'cup';
   const toUnit = converterState?.toUnit || 'g';
   const ingredientId = converterState?.ingredientId || 'ap-flour';
   const showDensitySelect = mode === 'volume-weight';
+
+  const cardId = 'ref-converter-card';
+  const isPinned = pinnedSet.has(cardId);
+  const isCollapsed = collapsedSet.has(cardId);
 
   const modes = [
     { id: 'volume-weight', label: 'Volume ↔ Weight' },
@@ -144,60 +220,74 @@ function renderConverterTab(converterState) {
   ).join('');
 
   return `
-    <div class="panel-card">
-      <h2>Kitchen Unit of Measure Converter</h2>
-      <p class="muted">
-        Convert baking volumes to weights using ingredient densities, switch between metric and US measures, or check oven temperatures. Accepts decimals and fractions like <code>1 1/2</code> or <code>3/4</code>.
-      </p>
-
-      <div class="seg-control converter-mode-bar" role="group" aria-label="Converter mode">
-        ${modeButtonsHtml}
+    <div class="panel-card ref-card ${isPinned ? 'is-pinned' : ''} ${isCollapsed ? 'is-collapsed' : ''}">
+      <div class="ref-card-header">
+        <button
+          type="button"
+          class="ref-card-title-btn"
+          data-action="toggle-collapse-ref-card"
+          data-card-id="${cardId}"
+          aria-expanded="${isCollapsed ? 'false' : 'true'}"
+        >
+          <h2>Kitchen Unit of Measure Converter</h2>
+        </button>
+        ${renderRefCardControls({ cardId, isPinned, isCollapsed })}
       </div>
 
-      <div class="converter-grid">
-        <div class="form-field">
-          <label for="converter-value-input">Amount (number or fraction)</label>
-          <input
-            id="converter-value-input"
-            type="text"
-            inputmode="decimal"
-            value="${escapeHtml(converterState?.value ?? '1')}"
-            placeholder="e.g., 1 1/2 or 250"
-          />
+      <div class="ref-card-body">
+        <p class="muted">
+          Convert baking volumes to weights using ingredient densities, switch between metric and US measures, or check oven temperatures. Accepts decimals and fractions like <code>1 1/2</code> or <code>3/4</code>.
+        </p>
+
+        <div class="seg-control converter-mode-bar" role="group" aria-label="Converter mode">
+          ${modeButtonsHtml}
         </div>
 
-        <div class="form-field">
-          <label for="converter-from-select">From Unit</label>
-          <select id="converter-from-select">
-            ${buildUnitOptions(fromUnit)}
-          </select>
+        <div class="converter-grid">
+          <div class="form-field">
+            <label for="converter-value-input">Amount (number or fraction)</label>
+            <input
+              id="converter-value-input"
+              type="text"
+              inputmode="decimal"
+              value="${escapeHtml(converterState?.value ?? '1')}"
+              placeholder="e.g., 1 1/2 or 250"
+            />
+          </div>
+
+          <div class="form-field">
+            <label for="converter-from-select">From Unit</label>
+            <select id="converter-from-select">
+              ${buildUnitOptions(fromUnit)}
+            </select>
+          </div>
+
+          <div class="converter-swap-wrap">
+            <button type="button" class="btn btn-outline" data-action="swap-converter-units" title="Swap units">⇄ Swap</button>
+          </div>
+
+          <div class="form-field">
+            <label for="converter-to-select">To Unit</label>
+            <select id="converter-to-select">
+              ${buildUnitOptions(toUnit)}
+            </select>
+          </div>
+
+          ${
+            showDensitySelect
+              ? `<div class="form-field converter-ingredient-field">
+                  <label for="converter-ingredient-select">Ingredient Density (for Volume ↔ Weight)</label>
+                  <select id="converter-ingredient-select">
+                    ${ingredientOptionsHtml}
+                  </select>
+                </div>`
+              : ''
+          }
         </div>
 
-        <div class="converter-swap-wrap">
-          <button type="button" class="btn btn-outline" data-action="swap-converter-units" title="Swap units">⇄ Swap</button>
+        <div id="converter-result-panel">
+          ${renderConverterResultHtml(converterState)}
         </div>
-
-        <div class="form-field">
-          <label for="converter-to-select">To Unit</label>
-          <select id="converter-to-select">
-            ${buildUnitOptions(toUnit)}
-          </select>
-        </div>
-
-        ${
-          showDensitySelect
-            ? `<div class="form-field converter-ingredient-field">
-                <label for="converter-ingredient-select">Ingredient Density (for Volume ↔ Weight)</label>
-                <select id="converter-ingredient-select">
-                  ${ingredientOptionsHtml}
-                </select>
-              </div>`
-            : ''
-        }
-      </div>
-
-      <div id="converter-result-panel">
-        ${renderConverterResultHtml(converterState)}
       </div>
     </div>
   `;
@@ -295,6 +385,8 @@ function renderSubstitutionsTab({
   subCategory = 'all',
   subQuery = '',
   editingSubId = null,
+  pinnedSet,
+  collapsedSet,
 }) {
   const cleanQuery = String(subQuery || '').trim().toLowerCase();
 
@@ -339,6 +431,10 @@ function renderSubstitutionsTab({
       ? substitutions.find((s) => s.id === editingSubId) || null
       : null;
 
+  const cardId = 'ref-substitutions-card';
+  const isPinned = pinnedSet.has(cardId);
+  const isCollapsed = collapsedSet.has(cardId);
+
   return `
     <div class="panel-card toolbar-card">
       <div class="collection-toolbar">
@@ -364,46 +460,60 @@ function renderSubstitutionsTab({
 
     ${editingSubId ? renderSubstitutionEditorForm(editingItem) : ''}
 
-    <div class="panel-card">
-      <h2>Ingredient &amp; Spice Substitutions (${visibleRows.length})</h2>
-      <div class="ref-table-wrap">
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Missing Item</th>
-              <th>Category</th>
-              <th>Amount</th>
-              <th>Substitute With</th>
-              <th>Notes</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              visibleRows.length > 0
-                ? visibleRows
-                    .map(
-                      (r) => `<tr>
-                        <td><strong>${escapeHtml(r.missing)}</strong></td>
-                        <td><span class="badge">${escapeHtml(r.category || 'Other')}</span></td>
-                        <td class="mono-cell">${escapeHtml(r.amount)}</td>
-                        <td>${escapeHtml(r.substitute)}</td>
-                        <td>${escapeHtml(r.notes)}</td>
-                        <td class="table-actions-cell">
-                          <button type="button" class="btn btn-sm btn-outline" data-action="edit-substitution" data-sub-id="${escapeHtml(
-                            r.id
-                          )}">Edit</button>
-                          <button type="button" class="btn btn-sm btn-danger-outline" data-action="delete-substitution" data-sub-id="${escapeHtml(
-                            r.id
-                          )}">Delete</button>
-                        </td>
-                      </tr>`
-                    )
-                    .join('')
-                : '<tr><td colspan="6" class="muted">No matching substitutions. Add a custom entry or reset defaults.</td></tr>'
-            }
-          </tbody>
-        </table>
+    <div class="panel-card ref-card ${isPinned ? 'is-pinned' : ''} ${isCollapsed ? 'is-collapsed' : ''}">
+      <div class="ref-card-header">
+        <button
+          type="button"
+          class="ref-card-title-btn"
+          data-action="toggle-collapse-ref-card"
+          data-card-id="${cardId}"
+          aria-expanded="${isCollapsed ? 'false' : 'true'}"
+        >
+          <h2>Ingredient &amp; Spice Substitutions (${visibleRows.length})</h2>
+        </button>
+        ${renderRefCardControls({ cardId, isPinned, isCollapsed })}
+      </div>
+
+      <div class="ref-card-body">
+        <div class="ref-table-wrap">
+          <table class="ref-table">
+            <thead>
+              <tr>
+                <th>Missing Item</th>
+                <th>Category</th>
+                <th>Amount</th>
+                <th>Substitute With</th>
+                <th>Notes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                visibleRows.length > 0
+                  ? visibleRows
+                      .map(
+                        (r) => `<tr>
+                          <td><strong>${escapeHtml(r.missing)}</strong></td>
+                          <td><span class="badge">${escapeHtml(r.category || 'Other')}</span></td>
+                          <td class="mono-cell">${escapeHtml(r.amount)}</td>
+                          <td>${escapeHtml(r.substitute)}</td>
+                          <td>${escapeHtml(r.notes)}</td>
+                          <td class="table-actions-cell">
+                            <button type="button" class="btn btn-sm btn-outline" data-action="edit-substitution" data-sub-id="${escapeHtml(
+                              r.id
+                            )}">Edit</button>
+                            <button type="button" class="btn btn-sm btn-danger-outline" data-action="delete-substitution" data-sub-id="${escapeHtml(
+                              r.id
+                            )}">Delete</button>
+                          </td>
+                        </tr>`
+                      )
+                      .join('')
+                  : '<tr><td colspan="6" class="muted">No matching substitutions. Add a custom entry or reset defaults.</td></tr>'
+              }
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   `;
@@ -414,7 +524,7 @@ function matchesFilter(rowValues, cleanQuery) {
   return rowValues.join(' ').toLowerCase().includes(cleanQuery);
 }
 
-function renderChartsTab(chartQuery = '') {
+function renderChartsTab(chartQuery = '', pinnedSet, collapsedSet, pinnedOnly) {
   const q = String(chartQuery || '').trim().toLowerCase();
 
   const meatRows = MEAT_TEMPERATURES.filter((r) =>
@@ -426,6 +536,124 @@ function renderChartsTab(chartQuery = '') {
   const oilRows = OIL_SMOKE_POINTS.filter((r) =>
     matchesFilter([r.oil, r.smokeF, r.smokeC, r.bestFor, r.flavor], q)
   );
+
+  const chartCards = [
+    {
+      id: 'chart-meat-temps',
+      title: `Internal Meat & Baking Temperatures (${meatRows.length})`,
+      bodyHtml: `
+        <div class="ref-table-wrap">
+          <table class="ref-table">
+            <thead>
+              <tr>
+                <th>Food / Cut</th>
+                <th>Category</th>
+                <th>°F</th>
+                <th>°C</th>
+                <th>Kitchen Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                meatRows.length > 0
+                  ? meatRows
+                      .map(
+                        (r) => `<tr>
+                          <td><strong>${escapeHtml(r.item)}</strong></td>
+                          <td>${escapeHtml(r.category)}</td>
+                          <td class="mono-cell">${escapeHtml(r.tempF)}</td>
+                          <td class="mono-cell">${escapeHtml(r.tempC)}</td>
+                          <td>${escapeHtml(r.notes)}</td>
+                        </tr>`
+                      )
+                      .join('')
+                  : '<tr><td colspan="5" class="muted">No matching temperature entries.</td></tr>'
+              }
+            </tbody>
+          </table>
+        </div>
+      `,
+    },
+    {
+      id: 'chart-grain-ratios',
+      title: `Grain & Legume-to-Water Ratios (per 1 cup dry) (${grainRows.length})`,
+      bodyHtml: `
+        <div class="ref-table-wrap">
+          <table class="ref-table">
+            <thead>
+              <tr>
+                <th>Grain / Legume</th>
+                <th>Ratio</th>
+                <th>Liquid</th>
+                <th>Simmer Time</th>
+                <th>Yield &amp; Tip</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                grainRows.length > 0
+                  ? grainRows
+                      .map(
+                        (r) => `<tr>
+                          <td><strong>${escapeHtml(r.grain)}</strong></td>
+                          <td class="mono-cell">${escapeHtml(r.ratio)}</td>
+                          <td>${escapeHtml(r.liquid)}</td>
+                          <td>${escapeHtml(r.cookTime)}</td>
+                          <td>${escapeHtml(r.yield)} · ${escapeHtml(r.tip)}</td>
+                        </tr>`
+                      )
+                      .join('')
+                  : '<tr><td colspan="5" class="muted">No matching grain ratios.</td></tr>'
+              }
+            </tbody>
+          </table>
+        </div>
+      `,
+    },
+    {
+      id: 'chart-oil-smoke',
+      title: `Cooking Oil Smoke Points (${oilRows.length})`,
+      bodyHtml: `
+        <div class="ref-table-wrap">
+          <table class="ref-table">
+            <thead>
+              <tr>
+                <th>Oil / Fat</th>
+                <th>Smoke °F</th>
+                <th>Smoke °C</th>
+                <th>Flavor</th>
+                <th>Best For</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                oilRows.length > 0
+                  ? oilRows
+                      .map(
+                        (r) => `<tr>
+                          <td><strong>${escapeHtml(r.oil)}</strong></td>
+                          <td class="mono-cell">${escapeHtml(r.smokeF)}</td>
+                          <td class="mono-cell">${escapeHtml(r.smokeC)}</td>
+                          <td>${escapeHtml(r.flavor)}</td>
+                          <td>${escapeHtml(r.bestFor)}</td>
+                        </tr>`
+                      )
+                      .join('')
+                  : '<tr><td colspan="5" class="muted">No matching oils.</td></tr>'
+              }
+            </tbody>
+          </table>
+        </div>
+      `,
+    },
+  ];
+
+  const visibleCharts = sortPinnedFirst(
+    pinnedOnly ? chartCards.filter((c) => pinnedSet.has(c.id)) : chartCards,
+    (c) => c.id,
+    pinnedSet
+  );
+  const visibleIds = visibleCharts.map((c) => c.id);
 
   return `
     <div class="panel-card toolbar-card">
@@ -439,110 +667,185 @@ function renderChartsTab(chartQuery = '') {
             placeholder="Filter charts (e.g., chicken, rice, avocado oil)..."
           />
         </div>
+        <div class="ref-toolbar-actions">
+          ${renderBulkVisibilityButtons({
+            visibleCardIds: visibleIds,
+            collapsedSet,
+            pinnedOnly,
+          })}
+        </div>
       </div>
     </div>
 
-    <div class="panel-card">
-      <h2>Internal Meat &amp; Baking Temperatures</h2>
-      <div class="ref-table-wrap">
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Food / Cut</th>
-              <th>Category</th>
-              <th>°F</th>
-              <th>°C</th>
-              <th>Kitchen Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              meatRows.length > 0
-                ? meatRows
-                    .map(
-                      (r) => `<tr>
-                        <td><strong>${escapeHtml(r.item)}</strong></td>
-                        <td>${escapeHtml(r.category)}</td>
-                        <td class="mono-cell">${escapeHtml(r.tempF)}</td>
-                        <td class="mono-cell">${escapeHtml(r.tempC)}</td>
-                        <td>${escapeHtml(r.notes)}</td>
-                      </tr>`
-                    )
-                    .join('')
-                : '<tr><td colspan="5" class="muted">No matching temperature entries.</td></tr>'
-            }
-          </tbody>
-        </table>
+    ${
+      visibleCharts.length > 0
+        ? visibleCharts
+            .map((chart) => {
+              const isPinned = pinnedSet.has(chart.id);
+              const isCollapsed = collapsedSet.has(chart.id);
+              return `
+                <div class="panel-card ref-card ${isPinned ? 'is-pinned' : ''} ${
+                isCollapsed ? 'is-collapsed' : ''
+              }">
+                  <div class="ref-card-header">
+                    <button
+                      type="button"
+                      class="ref-card-title-btn"
+                      data-action="toggle-collapse-ref-card"
+                      data-card-id="${escapeHtml(chart.id)}"
+                      aria-expanded="${isCollapsed ? 'false' : 'true'}"
+                    >
+                      <h2>${escapeHtml(chart.title)}</h2>
+                    </button>
+                    ${renderRefCardControls({
+                      cardId: chart.id,
+                      isPinned,
+                      isCollapsed,
+                    })}
+                  </div>
+                  <div class="ref-card-body">
+                    ${chart.bodyHtml}
+                  </div>
+                </div>
+              `;
+            })
+            .join('')
+        : '<div class="panel-card empty-state"><p class="muted">No pinned chart cards yet. Turn off "Pinned Only" or click Pin on any chart.</p></div>'
+    }
+  `;
+}
+
+function renderStorageTab({
+  storageCategory = 'all',
+  storageQuery = '',
+  pinnedSet,
+  collapsedSet,
+  pinnedOnly,
+}) {
+  const cleanQuery = String(storageQuery || '').trim().toLowerCase();
+
+  const categoryCards = FOOD_STORAGE_CATEGORIES.filter(
+    (cat) => storageCategory === 'all' || cat.id === storageCategory
+  )
+    .map((cat) => {
+      const rows = FOOD_STORAGE_TIMES.filter(
+        (item) =>
+          item.categoryId === cat.id &&
+          matchesFilter([item.food, item.fridge, item.freezer, item.pantry, item.notes], cleanQuery)
+      );
+      return { ...cat, rows };
+    })
+    .filter((cat) => !cleanQuery || cat.rows.length > 0);
+
+  const visibleCards = sortPinnedFirst(
+    pinnedOnly ? categoryCards.filter((c) => pinnedSet.has(c.id)) : categoryCards,
+    (c) => c.id,
+    pinnedSet
+  );
+  const visibleIds = visibleCards.map((c) => c.id);
+
+  const catButtons = [
+    `<button type="button" class="tag-pill ${
+      storageCategory === 'all' ? 'is-active' : ''
+    }" data-action="select-storage-category" data-category="all">All Categories (${
+      FOOD_STORAGE_TIMES.length
+    })</button>`,
+    ...FOOD_STORAGE_CATEGORIES.map((cat) => {
+      const count = FOOD_STORAGE_TIMES.filter((i) => i.categoryId === cat.id).length;
+      return `<button type="button" class="tag-pill ${
+        storageCategory === cat.id ? 'is-active' : ''
+      }" data-action="select-storage-category" data-category="${escapeHtml(
+        cat.id
+      )}">${escapeHtml(cat.label)} (${count})</button>`;
+    }),
+  ].join('');
+
+  return `
+    <div class="panel-card toolbar-card">
+      <div class="collection-toolbar">
+        <div class="toolbar-search">
+          <label for="reference-storage-search" class="sr-only">Search food storage times</label>
+          <input
+            id="reference-storage-search"
+            type="search"
+            value="${escapeHtml(storageQuery)}"
+            placeholder="Search storage times (e.g., chicken, rice, herbs, berries, flour)..."
+          />
+        </div>
+        <div class="ref-toolbar-actions">
+          ${renderBulkVisibilityButtons({
+            visibleCardIds: visibleIds,
+            collapsedSet,
+            pinnedOnly,
+          })}
+        </div>
+      </div>
+      <div class="tag-filter-bar" aria-label="Food storage categories">
+        <span class="tag-filter-label">Category:</span>
+        ${catButtons}
       </div>
     </div>
 
-    <div class="panel-card">
-      <h2>Grain &amp; Legume-to-Water Ratios (per 1 cup dry)</h2>
-      <div class="ref-table-wrap">
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Grain / Legume</th>
-              <th>Ratio</th>
-              <th>Liquid</th>
-              <th>Simmer Time</th>
-              <th>Yield &amp; Tip</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              grainRows.length > 0
-                ? grainRows
-                    .map(
-                      (r) => `<tr>
-                        <td><strong>${escapeHtml(r.grain)}</strong></td>
-                        <td class="mono-cell">${escapeHtml(r.ratio)}</td>
-                        <td>${escapeHtml(r.liquid)}</td>
-                        <td>${escapeHtml(r.cookTime)}</td>
-                        <td>${escapeHtml(r.yield)} · ${escapeHtml(r.tip)}</td>
-                      </tr>`
-                    )
-                    .join('')
-                : '<tr><td colspan="5" class="muted">No matching grain ratios.</td></tr>'
-            }
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="panel-card">
-      <h2>Cooking Oil Smoke Points</h2>
-      <div class="ref-table-wrap">
-        <table class="ref-table">
-          <thead>
-            <tr>
-              <th>Oil / Fat</th>
-              <th>Smoke °F</th>
-              <th>Smoke °C</th>
-              <th>Flavor</th>
-              <th>Best For</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              oilRows.length > 0
-                ? oilRows
-                    .map(
-                      (r) => `<tr>
-                        <td><strong>${escapeHtml(r.oil)}</strong></td>
-                        <td class="mono-cell">${escapeHtml(r.smokeF)}</td>
-                        <td class="mono-cell">${escapeHtml(r.smokeC)}</td>
-                        <td>${escapeHtml(r.flavor)}</td>
-                        <td>${escapeHtml(r.bestFor)}</td>
-                      </tr>`
-                    )
-                    .join('')
-                : '<tr><td colspan="5" class="muted">No matching oils.</td></tr>'
-            }
-          </tbody>
-        </table>
-      </div>
-    </div>
+    ${
+      visibleCards.length > 0
+        ? visibleCards
+            .map((cat) => {
+              const isPinned = pinnedSet.has(cat.id);
+              const isCollapsed = collapsedSet.has(cat.id);
+              return `
+                <div class="panel-card ref-card ${isPinned ? 'is-pinned' : ''} ${
+                isCollapsed ? 'is-collapsed' : ''
+              }">
+                  <div class="ref-card-header">
+                    <button
+                      type="button"
+                      class="ref-card-title-btn"
+                      data-action="toggle-collapse-ref-card"
+                      data-card-id="${escapeHtml(cat.id)}"
+                      aria-expanded="${isCollapsed ? 'false' : 'true'}"
+                    >
+                      <h2>${escapeHtml(cat.label)} (${cat.rows.length})</h2>
+                    </button>
+                    ${renderRefCardControls({
+                      cardId: cat.id,
+                      isPinned,
+                      isCollapsed,
+                    })}
+                  </div>
+                  <div class="ref-card-body">
+                    <div class="ref-table-wrap">
+                      <table class="ref-table">
+                        <thead>
+                          <tr>
+                            <th>Food</th>
+                            <th>Refrigerator (34–40°F)</th>
+                            <th>Freezer (0°F)</th>
+                            <th>Pantry / Counter</th>
+                            <th>Storage Tips</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${cat.rows
+                            .map(
+                              (r) => `<tr>
+                                <td><strong>${escapeHtml(r.food)}</strong></td>
+                                <td class="storage-duration-cell">${escapeHtml(r.fridge)}</td>
+                                <td class="storage-duration-cell">${escapeHtml(r.freezer)}</td>
+                                <td class="storage-duration-cell">${escapeHtml(r.pantry)}</td>
+                                <td>${escapeHtml(r.notes)}</td>
+                              </tr>`
+                            )
+                            .join('')}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              `;
+            })
+            .join('')
+        : '<div class="panel-card empty-state"><p class="muted">No matching food storage tables found. Adjust your filter or turn off "Pinned Only".</p></div>'
+    }
   `;
 }
 
@@ -667,7 +970,6 @@ function renderTechniqueEditorForm(editingTech) {
 
 function renderTechniqueCardBody(tech) {
   return `
-    <h3 class="technique-card-title">${escapeHtml(tech.title)}</h3>
     <p class="technique-summary">${escapeHtml(tech.summary)}</p>
     <ol class="technique-steps">
       ${(tech.steps || []).map((s) => `<li>${escapeHtml(s)}</li>`).join('')}
@@ -682,6 +984,14 @@ function renderTechniqueCardBody(tech) {
         ? `<div class="technique-mistake-box"><strong>Avoid:</strong> ${escapeHtml(tech.commonMistake)}</div>`
         : ''
     }
+    <div class="technique-keywords-row">
+      <span class="muted">Recipe auto-links:</span>
+      ${
+        (tech.keywords || []).length > 0
+          ? tech.keywords.map((kw) => `<code>${escapeHtml(kw)}</code>`).join(' ')
+          : '<span class="muted">(none)</span>'
+      }
+    </div>
   `;
 }
 
@@ -690,9 +1000,14 @@ function renderTechniquesTab({
   category = 'all',
   query = '',
   editingTechniqueId = null,
+  pinnedSet,
+  collapsedSet,
+  pinnedOnly,
 }) {
   const cleanQuery = String(query || '').trim().toLowerCase();
-  const visible = techniques.filter((t) => {
+  const filtered = techniques.filter((t) => {
+    const cardId = `tech-${t.id}`;
+    if (pinnedOnly && !pinnedSet.has(cardId)) return false;
     if (category && category !== 'all' && t.category !== category) return false;
     if (!cleanQuery) return true;
     const hay = [
@@ -708,6 +1023,9 @@ function renderTechniquesTab({
       .toLowerCase();
     return hay.includes(cleanQuery);
   });
+
+  const visible = sortPinnedFirst(filtered, (t) => `tech-${t.id}`, pinnedSet);
+  const visibleIds = visible.map((t) => `tech-${t.id}`);
 
   const dynamicCats = Array.from(
     new Set([
@@ -743,6 +1061,11 @@ function renderTechniquesTab({
           />
         </div>
         <div class="ref-toolbar-actions">
+          ${renderBulkVisibilityButtons({
+            visibleCardIds: visibleIds,
+            collapsedSet,
+            pinnedOnly,
+          })}
           <button type="button" class="btn btn-primary" data-action="new-technique">+ Add Technique</button>
           <button type="button" class="btn btn-outline" data-action="reset-ref-section" data-section="techniques">Reset Defaults</button>
         </div>
@@ -759,60 +1082,54 @@ function renderTechniquesTab({
       visible.length > 0
         ? `<div class="technique-grid">
             ${visible
-              .map(
-                (tech) => `<article class="panel-card technique-card">
-                  <div class="technique-card-top modal-header">
-                    <div class="card-badges-group">
-                      <span class="badge badge-divider">${escapeHtml(tech.category)}</span>
-                      <span class="badge">${escapeHtml(tech.time)}</span>
+              .map((tech) => {
+                const cardId = `tech-${tech.id}`;
+                const isPinned = pinnedSet.has(cardId);
+                const isCollapsed = collapsedSet.has(cardId);
+                const extraButtonsHtml = `
+                  <button type="button" class="btn btn-sm btn-outline" data-action="edit-technique" data-technique-id="${escapeHtml(
+                    tech.id
+                  )}">Edit</button>
+                  <button type="button" class="btn btn-sm btn-danger-outline" data-action="delete-technique" data-technique-id="${escapeHtml(
+                    tech.id
+                  )}">Delete</button>
+                `;
+                return `
+                  <article class="panel-card ref-card technique-card ${isPinned ? 'is-pinned' : ''} ${
+                  isCollapsed ? 'is-collapsed' : ''
+                }">
+                    <div class="ref-card-header">
+                      <div class="card-badges-group">
+                        <span class="badge badge-divider">${escapeHtml(tech.category)}</span>
+                        <span class="badge">${escapeHtml(tech.time)}</span>
+                      </div>
+                      ${renderRefCardControls({
+                        cardId,
+                        isPinned,
+                        isCollapsed,
+                        extraButtonsHtml,
+                      })}
                     </div>
-                    <div class="table-actions-cell">
-                      <button type="button" class="btn btn-sm btn-outline" data-action="edit-technique" data-technique-id="${escapeHtml(
-                        tech.id
-                      )}">Edit</button>
-                      <button type="button" class="btn btn-sm btn-danger-outline" data-action="delete-technique" data-technique-id="${escapeHtml(
-                        tech.id
-                      )}">Delete</button>
+                    <button
+                      type="button"
+                      class="ref-card-title-btn"
+                      data-action="toggle-collapse-ref-card"
+                      data-card-id="${escapeHtml(cardId)}"
+                      aria-expanded="${isCollapsed ? 'false' : 'true'}"
+                    >
+                      <h3 class="technique-card-title">${escapeHtml(tech.title)}</h3>
+                    </button>
+                    <div class="ref-card-body">
+                      ${renderTechniqueCardBody(tech)}
                     </div>
-                  </div>
-                  ${renderTechniqueCardBody(tech)}
-                  <div class="technique-keywords-row">
-                    <span class="muted">Recipe auto-links:</span>
-                    ${
-                      (tech.keywords || []).length > 0
-                        ? tech.keywords.map((kw) => `<code>${escapeHtml(kw)}</code>`).join(' ')
-                        : '<span class="muted">(none)</span>'
-                    }
-                  </div>
-                </article>`
-              )
+                  </article>
+                `;
+              })
               .join('')}
           </div>`
-        : '<div class="panel-card empty-state"><p class="muted">No matching cooking techniques found. Add one or reset defaults.</p></div>'
+        : '<div class="panel-card empty-state"><p class="muted">No matching cooking techniques found. Adjust filters or add a new card.</p></div>'
     }
   `;
-}
-
-function polarToCartesian(cx, cy, r, angleDeg) {
-  const rad = ((angleDeg - 90) * Math.PI) / 180;
-  return {
-    x: cx + r * Math.cos(rad),
-    y: cy + r * Math.sin(rad),
-  };
-}
-
-function buildWedgePath(cx, cy, innerR, outerR, startDeg, endDeg) {
-  const p1 = polarToCartesian(cx, cy, outerR, startDeg);
-  const p2 = polarToCartesian(cx, cy, outerR, endDeg);
-  const p3 = polarToCartesian(cx, cy, innerR, endDeg);
-  const p4 = polarToCartesian(cx, cy, innerR, startDeg);
-  return [
-    `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)}`,
-    `A ${outerR} ${outerR} 0 0 1 ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`,
-    `L ${p3.x.toFixed(1)} ${p3.y.toFixed(1)}`,
-    `A ${innerR} ${innerR} 0 0 0 ${p4.x.toFixed(1)} ${p4.y.toFixed(1)}`,
-    'Z',
-  ].join(' ');
 }
 
 function renderFlavorEditorForm(editingFlavor, allFlavors) {
@@ -823,10 +1140,18 @@ function renderFlavorEditorForm(editingFlavor, allFlavors) {
     familyId: FLAVOR_FAMILIES[0].id,
     profile: '',
     cuisineVibe: '',
+    foodPairings: {
+      meats: '',
+      vegetables: '',
+      soupsSalads: '',
+      appetizersBaking: '',
+    },
     bestWith: [],
     pairsWellWith: [],
     substitutes: '',
   };
+
+  const fp = item.foodPairings || {};
 
   const familyOptions = FLAVOR_FAMILIES.map(
     (fam) =>
@@ -853,7 +1178,7 @@ function renderFlavorEditorForm(editingFlavor, allFlavors) {
 
   return `
     <form id="ref-flavor-form" class="panel-card ref-editor-card" data-flavor-id="${escapeHtml(item.id)}">
-      <h2>${isNew ? 'Add Herb / Spice to Flavor Wheel' : `Edit Flavor: ${escapeHtml(item.name)}`}</h2>
+      <h2>${isNew ? 'Add Herb / Spice Profile' : `Edit Herb Profile: ${escapeHtml(item.name)}`}</h2>
       <div class="form-grid">
         <div class="form-field">
           <label for="flavor-name-input">Herb / Spice Name (required)</label>
@@ -863,7 +1188,7 @@ function renderFlavorEditorForm(editingFlavor, allFlavors) {
             type="text"
             required
             value="${escapeHtml(item.name)}"
-            placeholder="e.g., Tarragon, Fennel Seed"
+            placeholder="e.g., Fennel Seed, Savory"
           />
         </div>
 
@@ -897,20 +1222,64 @@ function renderFlavorEditorForm(editingFlavor, allFlavors) {
         </div>
 
         <div class="form-field form-span-2">
-          <label for="flavor-best-input">Best With (comma-separated dishes/ingredients)</label>
+          <label for="flavor-food-meats">Meats, Poultry &amp; Seafood Pairings</label>
+          <input
+            id="flavor-food-meats"
+            name="foodMeats"
+            type="text"
+            value="${escapeHtml(fp.meats || '')}"
+            placeholder="e.g., Roast chicken, lamb, salmon, pork chops"
+          />
+        </div>
+
+        <div class="form-field form-span-2">
+          <label for="flavor-food-veg">Vegetables Pairings</label>
+          <input
+            id="flavor-food-veg"
+            name="foodVegetables"
+            type="text"
+            value="${escapeHtml(fp.vegetables || '')}"
+            placeholder="e.g., Carrots, potatoes, tomatoes, green beans, winter squash"
+          />
+        </div>
+
+        <div class="form-field form-span-2">
+          <label for="flavor-food-soups">Soups, Salads &amp; Sauces Pairings</label>
+          <input
+            id="flavor-food-soups"
+            name="foodSoupsSalads"
+            type="text"
+            value="${escapeHtml(fp.soupsSalads || '')}"
+            placeholder="e.g., Minestrone, cucumber salad, pan gravies, vinaigrettes"
+          />
+        </div>
+
+        <div class="form-field form-span-2">
+          <label for="flavor-food-appetizers">Appetizers, Eggs &amp; Baking Pairings</label>
+          <input
+            id="flavor-food-appetizers"
+            name="foodAppetizersBaking"
+            type="text"
+            value="${escapeHtml(fp.appetizersBaking || '')}"
+            placeholder="e.g., Deviled eggs, cheese spreads, pickles, spice cake"
+          />
+        </div>
+
+        <div class="form-field form-span-2">
+          <label for="flavor-best-input">Top Foods Quick Highlights (comma-separated)</label>
           <input
             id="flavor-best-input"
             name="bestWith"
             type="text"
             value="${escapeHtml((item.bestWith || []).join(', '))}"
-            placeholder="e.g., Roast Chicken, Eggs, Salmon, Béarnaise"
+            placeholder="e.g., Roast Chicken, Eggs, Salmon, Tomatoes"
           />
         </div>
 
         ${
           pairCheckboxes
             ? `<div class="form-field form-span-2">
-                <label>Pairs Well With</label>
+                <label>Companion Herbs &amp; Spices</label>
                 <div class="flavor-pair-checkboxes">
                   ${pairCheckboxes}
                 </div>
@@ -931,110 +1300,33 @@ function renderFlavorEditorForm(editingFlavor, allFlavors) {
       </div>
 
       <div class="btn-row" style="margin-top: 12px;">
-        <button type="submit" class="btn btn-primary">Save Flavor Entry</button>
+        <button type="submit" class="btn btn-primary">Save Herb Profile</button>
         <button type="button" class="btn btn-secondary" data-action="cancel-ref-edit">Cancel</button>
       </div>
     </form>
   `;
 }
 
-function renderFlavorWheelTab({
-  flavors = [],
-  selectedFlavorId = 'rosemary',
-  editingFlavorId = null,
+function renderHerbProfileCard({
+  item,
+  family,
+  allFlavorsMap,
+  isPinned,
+  isCollapsed,
 }) {
-  const editingFlavor =
-    editingFlavorId && editingFlavorId !== '__new__'
-      ? flavors.find((f) => f.id === editingFlavorId) || null
-      : null;
+  const cardId = `herb-${item.id}`;
+  const fp = item.foodPairings || {};
 
-  if (flavors.length === 0) {
-    return `
-      ${editingFlavorId ? renderFlavorEditorForm(editingFlavor, flavors) : ''}
-      <div class="panel-card empty-state">
-        <h2>Flavor Pairing Wheel</h2>
-        <p class="muted">No herbs or spices in your flavor wheel yet.</p>
-        <div class="btn-row">
-          <button type="button" class="btn btn-primary" data-action="new-flavor">+ Add Herb / Spice</button>
-          <button type="button" class="btn btn-outline" data-action="reset-ref-section" data-section="flavors">Reset Defaults</button>
-        </div>
-      </div>
-    `;
-  }
+  const foodRows = [
+    { label: 'Meats, Poultry & Seafood', val: fp.meats },
+    { label: 'Vegetables', val: fp.vegetables },
+    { label: 'Soups, Salads & Sauces', val: fp.soupsSalads },
+    { label: 'Appetizers, Eggs & Baking', val: fp.appetizersBaking },
+  ].filter((r) => String(r.val || '').trim());
 
-  const activeFlavor = flavors.find((f) => f.id === selectedFlavorId) || flavors[0];
-  const activeFamily =
-    FLAVOR_FAMILIES.find((fam) => fam.id === activeFlavor.familyId) || FLAVOR_FAMILIES[0];
-
-  const cx = 180;
-  const cy = 180;
-  const innerR = 54;
-  const outerR = 162;
-  const stepDeg = 360 / FLAVOR_FAMILIES.length;
-
-  const wedgesHtml = FLAVOR_FAMILIES.map((fam, idx) => {
-    const startDeg = idx * stepDeg;
-    const endDeg = startDeg + stepDeg;
-    const midDeg = startDeg + stepDeg / 2;
-    const labelPos = polarToCartesian(cx, cy, (innerR + outerR) / 2, midDeg);
-    const isActive = fam.id === activeFamily.id;
-    const shortLabel = fam.name.split('&')[0].trim();
-
-    return `
-      <g
-        class="flavor-wedge ${isActive ? 'is-active' : ''}"
-        role="button"
-        tabindex="0"
-        data-action="select-flavor-family"
-        data-family-id="${escapeHtml(fam.id)}"
-        aria-label="${escapeHtml(fam.name)}"
-      >
-        <path
-          d="${buildWedgePath(cx, cy, innerR, outerR, startDeg, endDeg)}"
-          fill="${escapeHtml(fam.color)}"
-          fill-opacity="${isActive ? '0.92' : '0.62'}"
-          stroke="#f5f3ee"
-          stroke-width="2"
-        />
-        <text
-          x="${labelPos.x.toFixed(1)}"
-          y="${labelPos.y.toFixed(1)}"
-          text-anchor="middle"
-          dominant-baseline="middle"
-          class="flavor-wheel-label"
-        >${escapeHtml(shortLabel)}</text>
-      </g>
-    `;
-  }).join('');
-
-  const familyItemsHtml = FLAVOR_FAMILIES.map((fam) => {
-    const items = flavors.filter((p) => p.familyId === fam.id);
-    if (items.length === 0) return '';
-    return `
-      <div class="flavor-family-group">
-        <div class="flavor-family-heading">
-          <span class="flavor-swatch" style="background: ${escapeHtml(fam.color)};"></span>
-          <strong>${escapeHtml(fam.name)}</strong>
-        </div>
-        <div class="flavor-chip-row">
-          ${items
-            .map(
-              (item) => `<button
-                type="button"
-                class="tag-pill ${item.id === activeFlavor.id ? 'is-active' : ''}"
-                data-action="select-flavor"
-                data-flavor-id="${escapeHtml(item.id)}"
-              >${escapeHtml(item.name)}</button>`
-            )
-            .join('')}
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  const pairsChipsHtml = (activeFlavor.pairsWellWith || [])
+  const pairsChipsHtml = (item.pairsWellWith || [])
     .map((pairId) => {
-      const target = flavors.find((p) => p.id === pairId);
+      const target = allFlavorsMap.get(pairId);
       if (!target) return '';
       return `<button type="button" class="tag-chip" data-action="select-flavor" data-flavor-id="${escapeHtml(
         target.id
@@ -1042,95 +1334,229 @@ function renderFlavorWheelTab({
     })
     .join('');
 
-  return `
-    ${editingFlavorId ? renderFlavorEditorForm(editingFlavor, flavors) : ''}
+  const extraButtonsHtml = `
+    <button type="button" class="btn btn-sm btn-outline" data-action="edit-flavor" data-flavor-id="${escapeHtml(
+      item.id
+    )}">Edit</button>
+    <button type="button" class="btn btn-sm btn-danger-outline" data-action="delete-flavor" data-flavor-id="${escapeHtml(
+      item.id
+    )}">Delete</button>
+  `;
 
-    <div class="flavor-layout">
-      <div class="panel-card flavor-wheel-panel">
-        <div class="section-header-row">
-          <h2>Interactive Flavor Pairing Wheel</h2>
-          <div class="ref-toolbar-actions">
-            <button type="button" class="btn btn-sm btn-primary" data-action="new-flavor">+ Add</button>
-            <button type="button" class="btn btn-sm btn-outline" data-action="reset-ref-section" data-section="flavors">Reset</button>
-          </div>
+  return `
+    <article class="panel-card ref-card herb-profile-card ${isPinned ? 'is-pinned' : ''} ${
+    isCollapsed ? 'is-collapsed' : ''
+  }">
+      <div class="ref-card-header">
+        <div class="card-badges-group">
+          <span class="badge" style="background: ${escapeHtml(family.color)}; color: #ffffff; border-color: transparent;">${escapeHtml(
+            family.name
+          )}</span>
+          ${
+            item.cuisineVibe
+              ? `<span class="badge">${escapeHtml(item.cuisineVibe)}</span>`
+              : ''
+          }
         </div>
-        <p class="muted">Tap a flavor family wedge or pick an herb/spice below to improvise pairings and swaps.</p>
-        <div class="flavor-wheel-wrap">
-          <svg viewBox="0 0 360 360" class="flavor-wheel-svg" role="img" aria-label="Flavor pairing wheel">
-            ${wedgesHtml}
-            <circle cx="180" cy="180" r="50" class="flavor-wheel-hub" />
-            <text x="180" y="174" text-anchor="middle" class="flavor-hub-title">${escapeHtml(
-              activeFlavor.name
-            )}</text>
-            <text x="180" y="193" text-anchor="middle" class="flavor-hub-sub">${escapeHtml(
-              activeFamily.name.split('&')[0].trim()
-            )}</text>
-          </svg>
-        </div>
-        <div class="flavor-families-list">
-          ${familyItemsHtml}
-        </div>
+        ${renderRefCardControls({ cardId, isPinned, isCollapsed, extraButtonsHtml })}
       </div>
 
-      <div class="panel-card flavor-detail-panel">
-        <div class="modal-header">
-          <div class="card-badges-group">
-            <span class="badge" style="background: ${escapeHtml(activeFamily.color)}; color: #ffffff; border-color: transparent;">${escapeHtml(
-              activeFamily.name
-            )}</span>
-            ${
-              activeFlavor.cuisineVibe
-                ? `<span class="badge">${escapeHtml(activeFlavor.cuisineVibe)}</span>`
-                : ''
-            }
-          </div>
-          <div class="table-actions-cell">
-            <button type="button" class="btn btn-sm btn-outline" data-action="edit-flavor" data-flavor-id="${escapeHtml(
-              activeFlavor.id
-            )}">Edit</button>
-            <button type="button" class="btn btn-sm btn-danger-outline" data-action="delete-flavor" data-flavor-id="${escapeHtml(
-              activeFlavor.id
-            )}">Delete</button>
-          </div>
-        </div>
+      <button
+        type="button"
+        class="ref-card-title-btn"
+        data-action="toggle-collapse-ref-card"
+        data-card-id="${escapeHtml(cardId)}"
+        aria-expanded="${isCollapsed ? 'false' : 'true'}"
+      >
+        <h3 class="herb-profile-title">${escapeHtml(item.name)}</h3>
+      </button>
 
-        <h2 class="flavor-detail-title">${escapeHtml(activeFlavor.name)}</h2>
+      <div class="ref-card-body">
         ${
-          activeFlavor.profile
+          (item.bestWith || []).length > 0
+            ? `<div class="flavor-chip-row herb-best-with-row">
+                ${item.bestWith.map((dish) => `<span class="badge badge-accent-soft">${escapeHtml(dish)}</span>`).join('')}
+              </div>`
+            : ''
+        }
+
+        ${
+          foodRows.length > 0
+            ? `<div class="herb-food-pairings-grid">
+                ${foodRows
+                  .map(
+                    (row) => `
+                      <div class="herb-food-row">
+                        <span class="herb-food-cat">${escapeHtml(row.label)}</span>
+                        <p class="herb-food-items">${escapeHtml(row.val)}</p>
+                      </div>
+                    `
+                  )
+                  .join('')}
+              </div>`
+            : ''
+        }
+
+        ${
+          item.profile
             ? `<p class="flavor-profile-text"><strong>Flavor Profile:</strong> ${escapeHtml(
-                activeFlavor.profile
+                item.profile
               )}</p>`
             : ''
         }
 
-        <div class="flavor-section">
-          <h3>Best With</h3>
-          <div class="flavor-chip-row">
-            ${
-              (activeFlavor.bestWith || []).length > 0
-                ? activeFlavor.bestWith.map((dish) => `<span class="badge">${escapeHtml(dish)}</span>`).join('')
-                : '<span class="muted">None listed yet.</span>'
-            }
-          </div>
-        </div>
-
-        <div class="flavor-section">
-          <h3>Pairs Well With (click to explore)</h3>
-          <div class="flavor-chip-row">
-            ${pairsChipsHtml || '<span class="muted">No pairings linked yet — click Edit to add pairings.</span>'}
-          </div>
-        </div>
+        ${
+          pairsChipsHtml
+            ? `<div class="flavor-section">
+                <h4>Pairs Well With</h4>
+                <div class="flavor-chip-row">
+                  ${pairsChipsHtml}
+                </div>
+              </div>`
+            : ''
+        }
 
         ${
-          activeFlavor.substitutes
+          item.substitutes
             ? `<div class="flavor-sub-box">
-                <h3>Out of ${escapeHtml(activeFlavor.name)}? Try Instead</h3>
-                <p>${escapeHtml(activeFlavor.substitutes)}</p>
+                <h4>Out of ${escapeHtml(item.name)}? Try Instead</h4>
+                <p>${escapeHtml(item.substitutes)}</p>
               </div>`
             : ''
         }
       </div>
+    </article>
+  `;
+}
+
+function renderHerbProfilesTab({
+  flavors = [],
+  flavorFamily = 'all',
+  herbFoodFilter = 'all',
+  flavorQuery = '',
+  editingFlavorId = null,
+  pinnedSet,
+  collapsedSet,
+  pinnedOnly,
+}) {
+  const editingFlavor =
+    editingFlavorId && editingFlavorId !== '__new__'
+      ? flavors.find((f) => f.id === editingFlavorId) || null
+      : null;
+
+  const familyMap = new Map(FLAVOR_FAMILIES.map((fam) => [fam.id, fam]));
+  const allFlavorsMap = new Map(flavors.map((f) => [f.id, f]));
+  const cleanQuery = String(flavorQuery || '').trim().toLowerCase();
+
+  const filtered = flavors.filter((item) => {
+    const cardId = `herb-${item.id}`;
+    if (pinnedOnly && !pinnedSet.has(cardId)) return false;
+    if (flavorFamily && flavorFamily !== 'all' && item.familyId !== flavorFamily) {
+      return false;
+    }
+    if (herbFoodFilter && herbFoodFilter !== 'all') {
+      const val = String(item.foodPairings?.[herbFoodFilter] || '').trim();
+      if (!val) return false;
+    }
+    if (!cleanQuery) return true;
+    const fp = item.foodPairings || {};
+    const companionNames = (item.pairsWellWith || [])
+      .map((pid) => allFlavorsMap.get(pid)?.name || '')
+      .filter(Boolean);
+    const hay = [
+      item.name,
+      item.profile,
+      item.cuisineVibe,
+      fp.meats,
+      fp.vegetables,
+      fp.soupsSalads,
+      fp.appetizersBaking,
+      ...(item.bestWith || []),
+      ...companionNames,
+      item.substitutes,
+    ]
+      .join(' ')
+      .toLowerCase();
+    return hay.includes(cleanQuery);
+  });
+
+  const visible = sortPinnedFirst(filtered, (f) => `herb-${f.id}`, pinnedSet);
+  const visibleIds = visible.map((f) => `herb-${f.id}`);
+
+  const familyButtons = [
+    `<button type="button" class="tag-pill ${
+      flavorFamily === 'all' ? 'is-active' : ''
+    }" data-action="select-flavor-family" data-family-id="all">All (${flavors.length})</button>`,
+    ...FLAVOR_FAMILIES.map((fam) => {
+      const count = flavors.filter((f) => f.familyId === fam.id).length;
+      return `<button type="button" class="tag-pill ${
+        flavorFamily === fam.id ? 'is-active' : ''
+      }" data-action="select-flavor-family" data-family-id="${escapeHtml(fam.id)}">${escapeHtml(
+        fam.name
+      )} (${count})</button>`;
+    }),
+  ].join('');
+
+  const foodFilterButtons = HERB_FOOD_FILTERS.map(
+    (f) => `<button type="button" class="tag-pill ${
+      herbFoodFilter === f.id ? 'is-active' : ''
+    }" data-action="select-herb-food-filter" data-food-filter="${f.id}">${escapeHtml(f.label)}</button>`
+  ).join('');
+
+  return `
+    <div class="panel-card toolbar-card">
+      <div class="collection-toolbar">
+        <div class="toolbar-search">
+          <label for="reference-flavor-search" class="sr-only">Search herbs by food or profile</label>
+          <input
+            id="reference-flavor-search"
+            type="search"
+            value="${escapeHtml(flavorQuery)}"
+            placeholder="Search by food or herb (e.g., salmon, potatoes, chicken, basil, cinnamon)..."
+          />
+        </div>
+        <div class="ref-toolbar-actions">
+          ${renderBulkVisibilityButtons({
+            visibleCardIds: visibleIds,
+            collapsedSet,
+            pinnedOnly,
+          })}
+          <button type="button" class="btn btn-primary" data-action="new-flavor">+ Add Herb / Spice</button>
+          <button type="button" class="btn btn-outline" data-action="reset-ref-section" data-section="flavors">Reset Defaults</button>
+        </div>
+      </div>
+      <div class="tag-filter-bar" aria-label="Flavor families">
+        <span class="tag-filter-label">Family:</span>
+        ${familyButtons}
+      </div>
+      <div class="tag-filter-bar" aria-label="Food pairing focus" style="margin-top: 6px;">
+        <span class="tag-filter-label">Food Type:</span>
+        ${foodFilterButtons}
+      </div>
+      <p class="muted" style="margin: 8px 0 0; font-size: 0.85rem;">
+        Food pairings informed by the UMaine Extension Spice &amp; Herb Pairing Guide (#4365). Showing ${visible.length} of ${flavors.length} herb &amp; spice profiles.
+      </p>
     </div>
+
+    ${editingFlavorId ? renderFlavorEditorForm(editingFlavor, flavors) : ''}
+
+    ${
+      visible.length > 0
+        ? `<div class="herb-profile-grid">
+            ${visible
+              .map((item) =>
+                renderHerbProfileCard({
+                  item,
+                  family: familyMap.get(item.familyId) || FLAVOR_FAMILIES[0],
+                  allFlavorsMap,
+                  isPinned: pinnedSet.has(`herb-${item.id}`),
+                  isCollapsed: collapsedSet.has(`herb-${item.id}`),
+                })
+              )
+              .join('')}
+          </div>`
+        : '<div class="panel-card empty-state"><p class="muted">No matching herb or spice profiles. Adjust your search, turn off "Pinned Only", or add a custom profile.</p></div>'
+    }
   `;
 }
 
@@ -1145,13 +1571,22 @@ export function renderReferenceView({
   subQuery = '',
   editingSubId = null,
   chartQuery = '',
+  storageCategory = 'all',
+  storageQuery = '',
   techniqueCategory = 'all',
   techniqueQuery = '',
   editingTechniqueId = null,
-  selectedFlavorId = 'rosemary',
+  flavorFamily = 'all',
+  herbFoodFilter = 'all',
+  flavorQuery = '',
   editingFlavorId = null,
+  pinnedCards,
+  collapsedCards,
+  pinnedOnly = false,
 }) {
   const data = referenceData || getDefaultReferenceData();
+  const pinnedSet = asIdSet(pinnedCards);
+  const collapsedSet = asIdSet(collapsedCards);
 
   const tabsHtml = REF_TABS.map((tab) => {
     const active = activeTab === tab.id;
@@ -1170,24 +1605,42 @@ export function renderReferenceView({
       subCategory,
       subQuery,
       editingSubId,
+      pinnedSet,
+      collapsedSet,
     });
   } else if (activeTab === 'charts') {
-    bodyHtml = renderChartsTab(chartQuery);
+    bodyHtml = renderChartsTab(chartQuery, pinnedSet, collapsedSet, pinnedOnly);
+  } else if (activeTab === 'storage') {
+    bodyHtml = renderStorageTab({
+      storageCategory,
+      storageQuery,
+      pinnedSet,
+      collapsedSet,
+      pinnedOnly,
+    });
   } else if (activeTab === 'techniques') {
     bodyHtml = renderTechniquesTab({
       techniques: data.techniques || [],
       category: techniqueCategory,
       query: techniqueQuery,
       editingTechniqueId,
+      pinnedSet,
+      collapsedSet,
+      pinnedOnly,
     });
   } else if (activeTab === 'flavor') {
-    bodyHtml = renderFlavorWheelTab({
+    bodyHtml = renderHerbProfilesTab({
       flavors: data.flavors || [],
-      selectedFlavorId,
+      flavorFamily,
+      herbFoodFilter,
+      flavorQuery,
       editingFlavorId,
+      pinnedSet,
+      collapsedSet,
+      pinnedOnly,
     });
   } else {
-    bodyHtml = renderConverterTab(converterState);
+    bodyHtml = renderConverterTab(converterState, pinnedSet, collapsedSet);
   }
 
   return `

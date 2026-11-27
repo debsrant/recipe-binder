@@ -25,11 +25,5 @@
       "**/package-lock.json": true
     },
     "terminal.integrated.cwd": "${workspaceFolder:Recipe Binder}"
-  },
-  "extensions": {
-    "recommendations": [
-      "yzhang.markdown-all-in-one",
-      "continue.continue"
-    ]
   }
 }
