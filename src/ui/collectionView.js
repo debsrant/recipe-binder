@@ -149,7 +149,7 @@ export function renderCollectionView({
                 String(recipe.storageNotes || '').trim() || String(recipe.reheatNotes || '').trim()
               );
               const tagsHtml = (recipe.tags || [])
-                .slice(0, 4)
+                .slice(0, 5)
                 .map(
                   (tag) =>
                     `<button type="button" class="tag-chip" data-action="select-tag" data-tag="${escapeHtml(
@@ -170,11 +170,8 @@ export function renderCollectionView({
                         data-action="open-recipe"
                         data-recipe-id="${escapeHtml(recipe.id)}"
                       >
-                        <h2 class="recipe-card-title-text">${escapeHtml(recipe.title)}</h2>
+                        <h3 class="recipe-card-title-text">${escapeHtml(recipe.title)}</h3>
                       </button>
-                      <span class="badge badge-divider">${escapeHtml(dividerName)}</span>
-                      ${methodBadgeHtml}
-                      <span class="badge mono-cell">${escapeHtml(totalLabel)}</span>
                     </div>
 
                     <div class="ref-card-controls">
@@ -204,7 +201,7 @@ export function renderCollectionView({
                   </div>
 
                   <div class="ref-card-body">
-                    <div class="recipe-horiz-body ${safeImage ? '' : 'is-single-col'}">
+                    <div class="recipe-horiz-body ${safeImage ? 'has-thumb' : ''}">
                       ${
                         safeImage
                           ? `<button
@@ -224,33 +221,54 @@ export function renderCollectionView({
                           : ''
                       }
                       <div class="recipe-horiz-main">
-                        ${
-                          recipe.summary
-                            ? `<p class="recipe-card-summary">${escapeHtml(recipe.summary)}</p>`
-                            : '<p class="recipe-card-summary muted">No summary added yet.</p>'
-                        }
-                        <div class="recipe-meta-inline">
-                          <span><strong>Prep:</strong> ${escapeHtml(formatMinutes(prepMin))}</span>
-                          <span>·</span>
-                          <span><strong>Cook:</strong> ${escapeHtml(cookLabel)}</span>
-                          <span>·</span>
-                          <span><strong>Serves:</strong> ${escapeHtml(String(recipe.servings || 4))}${
-                            recipe.servingSize
-                              ? ` <span class="meta-serving-size">(${escapeHtml(recipe.servingSize)})</span>`
-                              : ''
-                          }</span>
+                        <div class="card-badges-group">
+                          <span class="badge badge-divider">${escapeHtml(dividerName)}</span>
+                          ${methodBadgeHtml}
                           ${
                             hasStorageOrReheat
                               ? '<span class="badge">Storage / Reheat</span>'
                               : ''
                           }
                         </div>
-                        <div class="recipe-card-footer">
-                          <div class="recipe-card-tags">${tagsHtml}</div>
-                          <button type="button" class="btn btn-primary btn-sm" data-action="open-recipe" data-recipe-id="${escapeHtml(
-                            recipe.id
-                          )}">Open Recipe →</button>
-                        </div>
+                        ${
+                          recipe.summary
+                            ? `<p class="recipe-card-summary">${escapeHtml(recipe.summary)}</p>`
+                            : '<p class="recipe-card-summary muted">No summary added yet.</p>'
+                        }
+                        ${
+                          recipe.source
+                            ? `<p class="recipe-card-source">Source: ${escapeHtml(recipe.source)}</p>`
+                            : ''
+                        }
+                        ${tagsHtml ? `<div class="recipe-card-tags">${tagsHtml}</div>` : ''}
+                      </div>
+
+                      <div class="recipe-horiz-side">
+                        <dl class="recipe-meta-row recipe-horiz-meta">
+                          <div>
+                            <dt>Prep</dt>
+                            <dd>${escapeHtml(formatMinutes(prepMin))}</dd>
+                          </div>
+                          <div>
+                            <dt>Cook</dt>
+                            <dd>${escapeHtml(cookLabel)}</dd>
+                          </div>
+                          <div>
+                            <dt>Total</dt>
+                            <dd>${escapeHtml(totalLabel)}</dd>
+                          </div>
+                          <div>
+                            <dt>Serves</dt>
+                            <dd>${escapeHtml(String(recipe.servings || 4))}${
+                              recipe.servingSize
+                                ? ` <span class="meta-serving-size">(${escapeHtml(recipe.servingSize)})</span>`
+                                : ''
+                            }</dd>
+                          </div>
+                        </dl>
+                        <button type="button" class="btn btn-primary btn-sm" data-action="open-recipe" data-recipe-id="${escapeHtml(
+                          recipe.id
+                        )}">Open Recipe →</button>
                       </div>
                     </div>
                   </div>
