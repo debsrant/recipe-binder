@@ -182,6 +182,8 @@ export function normalizeRecipe(input, fallbackDividerId = 'weeknight') {
     title: String(input?.title || '').trim() || 'Untitled Recipe',
     dividerId: String(input?.dividerId || '').trim() || fallbackDividerId,
     summary: String(input?.summary || '').trim(),
+    author: String(input?.author || '').trim(),
+    cuisine: String(input?.cuisine || '').trim(),
     source: String(input?.source || '').trim(),
     imageUrl: normalizeSafeImageUrl(input?.imageUrl || ''),
     prepMinutes: Number.isFinite(prepNum) && prepNum >= 0 ? Math.round(prepNum) : 0,
@@ -256,6 +258,8 @@ export function filterAndSortRecipes(
       const haystack = [
         recipe.title,
         recipe.summary,
+        recipe.author,
+        recipe.cuisine,
         recipe.source,
         recipe.servingSize,
         recipe.notes,
@@ -338,6 +342,28 @@ export function collectMethods(recipes) {
   }
   return Array.from(counts.values()).sort((a, b) =>
     b.count !== a.count ? b.count - a.count : a.method.localeCompare(b.method)
+  );
+}
+
+/**
+ * Aggregates unique cuisines and usage counts across active (non-deleted) recipes.
+ */
+export function collectCuisines(recipes) {
+  const counts = new Map();
+  for (const recipe of recipes || []) {
+    if (!recipe || recipe.deleted) continue;
+    const raw = String(recipe.cuisine || '').trim();
+    if (!raw) continue;
+    const key = raw.toLowerCase();
+    const existing = counts.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      counts.set(key, { cuisine: raw, count: 1 });
+    }
+  }
+  return Array.from(counts.values()).sort((a, b) =>
+    b.count !== a.count ? b.count - a.count : a.cuisine.localeCompare(b.cuisine)
   );
 }
 

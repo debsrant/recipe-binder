@@ -265,6 +265,34 @@ function extractAuthorName(author) {
   return '';
 }
 
+function extractCuisineValue(raw) {
+  if (!raw) return '';
+  const seen = new Set();
+  const list = [];
+  const pushVal = (v) => {
+    const clean = stripHtmlTags(String(v || '')).trim();
+    if (!clean) return;
+    const key = clean.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      list.push(clean);
+    }
+  };
+  if (Array.isArray(raw)) {
+    raw.forEach((entry) => String(entry || '').split(',').forEach(pushVal));
+  } else {
+    String(raw).split(',').forEach(pushVal);
+  }
+  return list.join(', ');
+}
+
+function extractMetaAuthor(html) {
+  const m =
+    html.match(/<meta\b[^>]*name=["']author["'][^>]*content=["']([^"']*)["'][^>]*>/i) ||
+    html.match(/<meta\b[^>]*content=["']([^"']*)["'][^>]*name=["']author["'][^>]*>/i);
+  return stripHtmlTags(m?.[1] || '').trim();
+}
+
 function flattenInstructions(rawInstructions) {
   const steps = [];
 
@@ -398,10 +426,15 @@ function extractMethodSections(rawInstructions, fallbackCookMinutes = 0) {
   return matchedMethods.length >= 2 ? matchedMethods : null;
 }
 
-function recipeFromJsonLdNode(node, { sourceUrl = '', dividers = [], fallbackDividerId = 'weeknight' } = {}) {
+function recipeFromJsonLdNode(
+  node,
+  { sourceUrl = '', fallbackAuthor = '', dividers = [], fallbackDividerId = 'weeknight' } = {}
+) {
   const title = stripHtmlTags(node.name || node.headline || '') || 'Imported Recipe';
   const summary = stripHtmlTags(node.description || '').split('\n')[0] || '';
-  const source = buildSourceLabel(node.author, sourceUrl);
+  const author = extractAuthorName(node.author) || String(fallbackAuthor || '').trim();
+  const cuisine = extractCuisineValue(node.recipeCuisine);
+  const source = buildSourceLabel(author, sourceUrl);
   const imageUrl = extractImageUrl(node.image, sourceUrl);
 
   const prepMinutes = parseDurationMinutes(node.prepTime);
@@ -453,6 +486,8 @@ function recipeFromJsonLdNode(node, { sourceUrl = '', dividers = [], fallbackDiv
     title,
     dividerId,
     summary,
+    author,
+    cuisine,
     source,
     imageUrl,
     prepMinutes,
@@ -536,13 +571,21 @@ function parseMicrodataRecipe(html, { sourceUrl = '', dividers = [], fallbackDiv
   const prepMatch = html.match(/itemprop=["']prepTime["'][^>]*(?:datetime|content)=["']([^"']+)["']/i);
   const cookMatch = html.match(/itemprop=["']cookTime["'][^>]*(?:datetime|content)=["']([^"']+)["']/i);
   const yieldMatch = html.match(/itemprop=["']recipeYield["'][^>]*>([\s\S]*?)<\/[^>]+>/i);
+  const authorItemMatch = html.match(/<[^>]*itemprop=["']author["'][^>]*>([\s\S]*?)<\/[^>]+>/i);
+  const cuisineItemMatch = html.match(
+    /<[^>]*itemprop=["']recipeCuisine["'][^>]*(?:content=["']([^"']*)["']|>([\s\S]*?)<\/[^>]+>)/i
+  );
+  const author = stripHtmlTags(authorItemMatch?.[1] || '') || extractMetaAuthor(html);
+  const cuisine = extractCuisineValue(cuisineItemMatch?.[1] || cuisineItemMatch?.[2] || '');
 
   return {
     id: '',
     title,
-    dividerId: guessDividerId([title], dividers, fallbackDividerId),
+    dividerId: guessDividerId([title, cuisine], dividers, fallbackDividerId),
     summary,
-    source: buildSourceLabel('', sourceUrl),
+    author,
+    cuisine,
+    source: buildSourceLabel(author, sourceUrl),
     imageUrl: extractMetaOgImage(html, sourceUrl),
     prepMinutes: parseDurationMinutes(prepMatch?.[1] || 0),
     cookMinutes: parseDurationMinutes(cookMatch?.[1] || 0),
@@ -570,11 +613,13 @@ export function parseHtmlRecipe(
 
   const ldBlocks = parseJsonLdBlocks(rawHtml);
   const ogImage = extractMetaOgImage(rawHtml, sourceUrl);
+  const metaAuthor = extractMetaAuthor(rawHtml);
   for (const block of ldBlocks) {
     const recipeNode = findRecipeNode(block);
     if (recipeNode) {
       const parsed = recipeFromJsonLdNode(recipeNode, {
         sourceUrl,
+        fallbackAuthor: metaAuthor,
         dividers,
         fallbackDividerId,
       });
@@ -617,7 +662,8 @@ export function parseHtmlRecipe(
 
   return {
     ...textParsed,
-    source: textParsed.source || buildSourceLabel('', sourceUrl),
+    author: textParsed.author || metaAuthor,
+    source: textParsed.source || buildSourceLabel(metaAuthor, sourceUrl),
     notes: textParsed.notes || (sourceUrl ? `Imported from: ${sourceUrl}` : ''),
   };
 }
@@ -723,6 +769,8 @@ export function parseTextRecipe(
 
   let title = '';
   let summary = '';
+  let author = '';
+  let cuisine = '';
   let source = '';
   let prepMinutes = 0;
   let cookMinutes = 0;
@@ -773,7 +821,7 @@ export function parseTextRecipe(
 
     if (section === 'header') {
       const metaMatch = line.match(
-        /^(title|recipe|prep(?:\s*time)?|cook(?:\s*time)?|total(?:\s*time)?|servings?|yield|serves|source|from|author|tags?|summary|description)\s*:\s*(.+)$/i
+        /^(title|recipe|prep(?:\s*time)?|cook(?:\s*time)?|total(?:\s*time)?|servings?|yield|serves|source|from|author|by|cuisine|tags?|summary|description)\s*:\s*(.+)$/i
       );
       if (metaMatch) {
         const key = metaMatch[1].toLowerCase();
@@ -783,7 +831,9 @@ export function parseTextRecipe(
         else if (key.startsWith('cook')) cookMinutes = parseDurationMinutes(val);
         else if (key.startsWith('total')) totalMinutes = parseDurationMinutes(val);
         else if (key.startsWith('serv') || key === 'yield') servings = parseServingsNumber(val);
-        else if (key === 'source' || key === 'from' || key === 'author') source = val;
+        else if (key === 'author' || key === 'by') author = val;
+        else if (key === 'cuisine') cuisine = val;
+        else if (key === 'source' || key === 'from') source = val;
         else if (key.startsWith('tag')) tags = parseTagsInput(val);
         else if (key === 'summary' || key === 'description') summary = val;
         continue;
@@ -882,6 +932,8 @@ export function parseTextRecipe(
     title: finalTitle,
     dividerId,
     summary,
+    author,
+    cuisine,
     source,
     prepMinutes,
     cookMinutes: methods[0].cookMinutes || cookMinutes,

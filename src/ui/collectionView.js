@@ -225,6 +225,11 @@ export function renderCollectionView({
                       <div class="recipe-horiz-main">
                         <div class="card-badges-group">
                           <span class="badge badge-divider">${escapeHtml(dividerName)}</span>
+                          ${
+                            recipe.cuisine
+                              ? `<span class="badge badge-cuisine">${escapeHtml(recipe.cuisine)}</span>`
+                              : ''
+                          }
                           ${methodBadgeHtml}
                           ${
                             isMixRecipe(recipe, dividers)
@@ -248,8 +253,17 @@ export function renderCollectionView({
                             : '<p class="recipe-card-summary muted">No summary added yet.</p>'
                         }
                         ${
-                          recipe.source
-                            ? `<p class="recipe-card-source">Source: ${escapeHtml(recipe.source)}</p>`
+                          recipe.author || recipe.source
+                            ? `<p class="recipe-card-source">${
+                                recipe.author
+                                  ? `By <strong>${escapeHtml(recipe.author)}</strong>${
+                                      recipe.source &&
+                                      recipe.source.toLowerCase() !== recipe.author.toLowerCase()
+                                        ? ` · ${escapeHtml(recipe.source)}`
+                                        : ''
+                                    }`
+                                  : `Source: ${escapeHtml(recipe.source)}`
+                              }</p>`
                             : ''
                         }
                         ${tagsHtml ? `<div class="recipe-card-tags">${tagsHtml}</div>` : ''}
@@ -327,7 +341,7 @@ export function renderCollectionView({
               id="recipe-search-input"
               type="search"
               value="${escapeHtml(searchQuery)}"
-              placeholder="Filter by title, ingredient, storage, or note..."
+              placeholder="Filter by title, cuisine, author, ingredient, or note..."
               data-action="search-input"
             />
           </div>

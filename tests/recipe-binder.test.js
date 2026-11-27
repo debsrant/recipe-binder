@@ -7,6 +7,7 @@ import {
   scaleIngredientLine,
 } from '../src/lib/scaling.js';
 import {
+  collectCuisines,
   collectMethods,
   collectTags,
   filterAndSortRecipes,
@@ -1668,4 +1669,86 @@ test('Canning specs normalize, round-trip via Markdown, search cleanly, and Cann
 
   assert.ok(METHOD_CONVERSION_PRESETS.includes('Toaster Oven'));
   assert.equal(METHOD_CONVERSION_PRESETS.includes('Pressure Canner'), false);
+});
+
+test('Author & cuisine auto-detect from JSON-LD, Microdata, meta tags, Markdown, AI, and filter search', () => {
+  const jsonLdHtml = `
+    <html><head>
+      <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@type": "Recipe",
+          "name": "Weeknight Pad Thai",
+          "author": { "@type": "Person", "name": "Pailin Chongchitnant" },
+          "recipeCuisine": ["Thai", "Southeast Asian"],
+          "recipeIngredient": ["8 oz rice noodles", "2 tbsp tamarind paste"],
+          "recipeInstructions": ["Soak noodles.", "Stir fry sauce and noodles."]
+        }
+      </script>
+    </head><body></body></html>
+  `;
+  const fromJsonLd = parseHtmlRecipe(jsonLdHtml, {
+    sourceUrl: 'https://hot-thai-kitchen.com/pad-thai',
+    dividers: TEST_DIVIDERS,
+  });
+  assert.equal(fromJsonLd.author, 'Pailin Chongchitnant');
+  assert.equal(fromJsonLd.cuisine, 'Thai, Southeast Asian');
+  assert.equal(fromJsonLd.source, 'Pailin Chongchitnant (hot-thai-kitchen.com)');
+
+  const microHtml = `
+    <html>
+      <head><meta name="author" content="Meta Chef"></head>
+      <body>
+        <h1 itemprop="name">Tacos al Pastor</h1>
+        <span itemprop="recipeCuisine">Mexican</span>
+        <ul><li itemprop="recipeIngredient">2 lb pork shoulder</li></ul>
+        <ol itemprop="recipeInstructions"><li>Roast and slice thinly.</li></ol>
+      </body>
+    </html>
+  `;
+  const fromMicro = parseHtmlRecipe(microHtml, {
+    sourceUrl: 'https://example.org/tacos',
+    dividers: TEST_DIVIDERS,
+  });
+  assert.equal(fromMicro.author, 'Meta Chef');
+  assert.equal(fromMicro.cuisine, 'Mexican');
+  assert.equal(fromMicro.source, 'Meta Chef (example.org)');
+
+  const normalized = normalizeRecipe(fromMicro, 'weeknight');
+  const md = recipeToMarkdown(normalized, { dividerName: 'Weeknight Staples' });
+  assert.ok(md.includes('author: "Meta Chef"'));
+  assert.ok(md.includes('cuisine: "Mexican"'));
+  const roundTrip = parseMarkdownRecipe(md, { dividers: TEST_DIVIDERS });
+  assert.equal(roundTrip.author, 'Meta Chef');
+  assert.equal(roundTrip.cuisine, 'Mexican');
+
+  const matchingCuisine = filterAndSortRecipes([normalized], { query: 'mexican' });
+  const matchingAuthor = filterAndSortRecipes([normalized], { query: 'meta chef' });
+  assert.equal(matchingCuisine.length, 1);
+  assert.equal(matchingAuthor.length, 1);
+
+  assert.deepEqual(collectCuisines([normalized]), [{ cuisine: 'Mexican', count: 1 }]);
+
+  const videoAiDraft = aiJsonToRecipeDraft(
+    {
+      title: 'Crispy Potatoes',
+      cuisine: 'Mediterranean',
+      ingredients: ['2 lbs potatoes'],
+      methods: [{ name: 'Oven', cookMinutes: 40, steps: ['Roast at 425 F.'] }],
+    },
+    {
+      sourceUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      sourceAuthor: 'Kenji Cooking Show',
+      dividers: TEST_DIVIDERS,
+    }
+  );
+  assert.equal(videoAiDraft.author, 'Kenji Cooking Show');
+  assert.equal(videoAiDraft.cuisine, 'Mediterranean');
+
+  const mergedMeta = mergeAiAutofillIntoDraft(
+    { title: 'My Soup', author: 'Existing Author', cuisine: '', servings: 4 },
+    { author: 'AI Guess Author', cuisine: 'French' }
+  );
+  assert.equal(mergedMeta.author, 'Existing Author');
+  assert.equal(mergedMeta.cuisine, 'French');
 });

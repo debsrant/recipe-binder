@@ -123,6 +123,8 @@ export function recipeToMarkdown(recipe, { dividerName = '', scaleFactor = 1 } =
   fmLines.push(`title: ${yamlQuote(recipe?.title || 'Untitled Recipe')}`);
   if (dividerName) fmLines.push(`divider: ${yamlQuote(dividerName)}`);
   if (recipe?.dividerId) fmLines.push(`dividerId: ${yamlQuote(recipe.dividerId)}`);
+  if (recipe?.author) fmLines.push(`author: ${yamlQuote(recipe.author)}`);
+  if (recipe?.cuisine) fmLines.push(`cuisine: ${yamlQuote(recipe.cuisine)}`);
   if (recipe?.source) fmLines.push(`source: ${yamlQuote(recipe.source)}`);
   if (recipe?.imageUrl && /^https?:\/\//i.test(recipe.imageUrl)) {
     fmLines.push(`imageUrl: ${yamlQuote(recipe.imageUrl)}`);
@@ -160,6 +162,12 @@ export function recipeToMarkdown(recipe, { dividerName = '', scaleFactor = 1 } =
     `**Servings:** ${scaledServingsLabel}${servingSizeSuffix}${factor !== 1 ? ` [${factor}x]` : ''}`,
   ];
   body.push('', metaParts.join(' | '));
+  if (recipe?.author) {
+    body.push(`**Author:** ${String(recipe.author).trim()}`);
+  }
+  if (recipe?.cuisine) {
+    body.push(`**Cuisine:** ${String(recipe.cuisine).trim()}`);
+  }
   if (recipe?.source) {
     body.push(`**Source:** ${String(recipe.source).trim()}`);
   }
@@ -351,6 +359,8 @@ export function parseMarkdownRecipe(
 
   let bodyTitle = '';
   let bodySummary = '';
+  let bodyAuthor = '';
+  let bodyCuisine = '';
   let bodySource = '';
   let bodyPrep = 0;
   let bodyCook = 0;
@@ -480,6 +490,10 @@ export function parseMarkdownRecipe(
             if (parenMatch && !/^\d+(?:\.\d+)?x$/i.test(parenMatch[1].trim())) {
               bodyServingSize = parenMatch[1].replace(/\s+each$/i, '').trim();
             }
+          } else if (k === 'author' || k === 'by') {
+            bodyAuthor = v;
+          } else if (k === 'cuisine') {
+            bodyCuisine = v;
           } else if (k === 'source' || k === 'from') {
             bodySource = v;
           } else if (k === 'tags') {
@@ -489,7 +503,19 @@ export function parseMarkdownRecipe(
         continue;
       }
 
-      const sourceMatch = plainMeta.match(/^(?:source|from|author)\s*:\s*(.+)$/i);
+      const authorMatch = plainMeta.match(/^(?:author|by)\s*:\s*(.+)$/i);
+      if (authorMatch) {
+        bodyAuthor = authorMatch[1].trim();
+        continue;
+      }
+
+      const cuisineMatch = plainMeta.match(/^cuisine\s*:\s*(.+)$/i);
+      if (cuisineMatch) {
+        bodyCuisine = cuisineMatch[1].trim();
+        continue;
+      }
+
+      const sourceMatch = plainMeta.match(/^(?:source|from)\s*:\s*(.+)$/i);
       if (sourceMatch) {
         bodySource = sourceMatch[1].trim();
         continue;
@@ -630,7 +656,9 @@ export function parseMarkdownRecipe(
     title,
     dividerId: resolveDividerId(frontmatter, dividers, fallbackDividerId),
     summary: String(frontmatter.summary || frontmatter.description || bodySummary || '').trim(),
-    source: String(frontmatter.source || frontmatter.url || frontmatter.author || bodySource || '').trim(),
+    author: String(frontmatter.author || bodyAuthor || '').trim(),
+    cuisine: String(frontmatter.cuisine || frontmatter.recipeCuisine || bodyCuisine || '').trim(),
+    source: String(frontmatter.source || frontmatter.url || bodySource || '').trim(),
     imageUrl: String(frontmatter.imageUrl || frontmatter.image || '').trim(),
     prepMinutes,
     cookMinutes: methods[0].cookMinutes || cookMinutes,

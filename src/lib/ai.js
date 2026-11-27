@@ -58,6 +58,8 @@ const RECIPE_RESPONSE_SCHEMA = {
     title: { type: 'string' },
     dividerHint: { type: 'string' },
     summary: { type: 'string' },
+    author: { type: 'string' },
+    cuisine: { type: 'string' },
     prepMinutes: { type: 'number' },
     servings: { type: 'number' },
     servingSize: { type: 'string' },
@@ -233,6 +235,7 @@ export function aiJsonToRecipeDraft(
   {
     sourceUrl = '',
     sourceTitle = '',
+    sourceAuthor = '',
     sourceTranscript = '',
     dividers = [],
     fallbackDividerId = 'weeknight',
@@ -274,6 +277,8 @@ export function aiJsonToRecipeDraft(
     {
       title: String(src.title || sourceTitle || 'AI Extracted Recipe').trim(),
       dividerId,
+      author: String(sourceAuthor || src.author || '').trim(),
+      cuisine: String(src.cuisine || '').trim(),
       source: String(sourceUrl || src.source || '').trim(),
       summary: String(src.summary || '').trim(),
       prepMinutes: Math.max(0, Math.round(Number(src.prepMinutes) || 0)),
@@ -538,6 +543,7 @@ export async function extractRecipeWithAi({
   sourceLabel = 'recipe text',
   sourceUrl = '',
   sourceTitle = '',
+  sourceAuthor = '',
   sourceTranscript = '',
   dividers = [],
   fallbackDividerId = 'weeknight',
@@ -558,12 +564,15 @@ export async function extractRecipeWithAi({
   const userPrompt = [
     `Convert this ${sourceLabel} into a Recipe Binder JSON object.`,
     sourceTitle ? `Known title hint: ${sourceTitle}` : '',
+    sourceAuthor ? `Known author/channel: ${sourceAuthor}` : '',
     dividerChoices ? `Choose dividerHint from these binder dividers if relevant: ${dividerChoices}` : '',
     'JSON fields:',
     '{',
     '  "title": "Recipe Name",',
     '  "dividerHint": "divider id or name",',
     '  "summary": "1-2 sentence overview",',
+    '  "author": "Chef or channel name if known",',
+    '  "cuisine": "e.g., Italian, Mexican, Thai, American",',
     '  "prepMinutes": 15,',
     '  "servings": 4,',
     '  "servingSize": "1 bowl or 2 tacos",',
@@ -592,6 +601,7 @@ export async function extractRecipeWithAi({
   return aiJsonToRecipeDraft(parsed, {
     sourceUrl,
     sourceTitle,
+    sourceAuthor,
     sourceTranscript,
     dividers,
     fallbackDividerId,
@@ -834,6 +844,8 @@ export function mergeAiAutofillIntoDraft(draft, aiPatch) {
       : currentTitle;
 
   const summary = String(base.summary || '').trim() || String(patch.summary || '').trim();
+  const cuisine = String(base.cuisine || '').trim() || String(patch.cuisine || '').trim();
+  const author = String(base.author || '').trim() || String(patch.author || '').trim();
   const currentPrep = Number(base.prepMinutes);
   const patchPrep = Number(patch.prepMinutes);
   const prepMinutes =
@@ -870,6 +882,8 @@ export function mergeAiAutofillIntoDraft(draft, aiPatch) {
     ...base,
     title,
     summary,
+    author,
+    cuisine,
     prepMinutes,
     servings,
     servingSize,
@@ -893,6 +907,7 @@ export async function autofillMissingRecipeFieldsWithAi({ recipe, config }) {
     properties: {
       title: { type: 'string' },
       summary: { type: 'string' },
+      cuisine: { type: 'string' },
       prepMinutes: { type: 'number' },
       servings: { type: 'number' },
       servingSize: { type: 'string' },
@@ -903,11 +918,11 @@ export async function autofillMissingRecipeFieldsWithAi({ recipe, config }) {
   };
 
   const systemInstruction =
-    'You are a practical recipe editor. Suggest realistic, concise missing details for this recipe (title, 1-sentence summary, prep time, base servings, per-portion servingSize, up to 5 kebab-case tags, fridge/freezer storageNotes, and microwave/reheatNotes). Return ONLY JSON.';
+    'You are a practical recipe editor. Suggest realistic, concise missing details for this recipe (title, 1-sentence summary, cuisine, prep time, base servings, per-portion servingSize, up to 5 kebab-case tags, fridge/freezer storageNotes, and microwave/reheatNotes). Return ONLY JSON.';
 
   const userPrompt = [
     'Generate helpful recipe metadata matching:',
-    '{ "title": "...", "summary": "...", "prepMinutes": 15, "servings": 4, "servingSize": "1 bowl", "tags": ["weeknight"], "storageNotes": "Fridge 3-4 days airtight; freezes well up to 3 months.", "reheatNotes": "Microwave covered 90 sec, stir, then 30-60 sec until hot." }',
+    '{ "title": "...", "summary": "...", "cuisine": "Italian", "prepMinutes": 15, "servings": 4, "servingSize": "1 bowl", "tags": ["weeknight"], "storageNotes": "Fridge 3-4 days airtight; freezes well up to 3 months.", "reheatNotes": "Microwave covered 90 sec, stir, then 30-60 sec until hot." }',
     '',
     contextText,
   ].join('\n');

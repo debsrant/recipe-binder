@@ -307,6 +307,9 @@ const state = {
   importUrl: '',
   isScraping: false,
   scrapeError: '',
+  importVideoUrl: '',
+  isImportingVideo: false,
+  videoImportError: '',
   pasteText: '',
   importSaveImmediately: false,
   isDragOver: false,
@@ -508,6 +511,9 @@ function renderMainContent() {
       urlInput: state.importUrl,
       isScraping: state.isScraping,
       scrapeError: state.scrapeError,
+      videoUrlInput: state.importVideoUrl,
+      isImportingVideo: state.isImportingVideo,
+      videoImportError: state.videoImportError,
       pasteText: state.pasteText,
       saveImmediately: state.importSaveImmediately,
       isDragOver: state.isDragOver,
@@ -840,6 +846,101 @@ async function submitCookQaQuestion(rawQuestion) {
   }
 }
 
+async function importRecipeFromVideoUrl(rawUrl) {
+  const safeUrl = normalizeSafeUrl(rawUrl);
+  const ytId = extractYouTubeId(safeUrl);
+  if (!safeUrl || !ytId) {
+    state.videoImportError = 'Enter a valid YouTube video URL (e.g., https://www.youtube.com/watch?v=...).';
+    render();
+    return;
+  }
+
+  state.importVideoUrl = safeUrl;
+  state.isImportingVideo = true;
+  state.videoImportError = '';
+  render();
+
+  const fallbackDividerId =
+    state.activeDividerId !== 'all' ? state.activeDividerId : state.dividers[0]?.id || 'weeknight';
+
+  try {
+    const result = await fetchYouTubeTranscript(safeUrl);
+    const cleanTranscript = stripTranscriptTimestamps(result.transcript);
+    const channelAuthor = String(result.author || '').trim();
+    const videoTitle = String(result.title || '').trim();
+
+    if (isAiReady(state.aiConfig)) {
+      try {
+        const draft = await extractRecipeWithAi({
+          text: cleanTranscript,
+          sourceLabel: 'YouTube cooking video transcript',
+          sourceUrl: safeUrl,
+          sourceTitle: videoTitle,
+          sourceAuthor: channelAuthor,
+          sourceTranscript: cleanTranscript,
+          dividers: state.dividers,
+          fallbackDividerId,
+          config: state.aiConfig,
+        });
+        state.isImportingVideo = false;
+        state.draftRecipe = {
+          ...draft,
+          author: draft.author || channelAuthor,
+          source: draft.source || safeUrl,
+        };
+        state.editingRecipeId = null;
+        state.view = 'editor';
+        setNotice(
+          'positive',
+          `Created "${state.draftRecipe.title}" from YouTube video${
+            channelAuthor ? ` (${channelAuthor})` : ''
+          } — review and save.`
+        );
+        render();
+        return;
+      } catch (aiErr) {
+        setNotice(
+          'warning',
+          `AI extraction skipped (${aiErr?.message || 'error'}). Opened transcript draft in editor instead.`
+        );
+      }
+    }
+
+    const fallbackDraft = parseTextRecipe(cleanTranscript, {
+      dividers: state.dividers,
+      fallbackDividerId,
+    });
+    state.isImportingVideo = false;
+    state.draftRecipe = normalizeRecipe(
+      {
+        ...fallbackDraft,
+        title: videoTitle || fallbackDraft.title || 'YouTube Video Recipe',
+        author: channelAuthor || fallbackDraft.author || '',
+        source: channelAuthor ? `${channelAuthor} (YouTube)` : safeUrl,
+        sourceTranscript: cleanTranscript,
+        notes: fallbackDraft.notes
+          ? `${fallbackDraft.notes}\n\nVideo: ${safeUrl}`
+          : `Imported from YouTube: ${safeUrl}`,
+      },
+      fallbackDividerId
+    );
+    state.editingRecipeId = null;
+    state.view = 'editor';
+    if (!isAiReady(state.aiConfig)) {
+      setNotice(
+        'warning',
+        `Loaded transcript & channel${
+          channelAuthor ? ` (${channelAuthor})` : ''
+        } into the editor. Enable AI in Sync & Backup for automatic ingredient/step extraction.`
+      );
+    }
+  } catch (err) {
+    state.isImportingVideo = false;
+    state.videoImportError = err?.message || 'Could not import recipe from video URL.';
+  }
+  render();
+}
+
 function readEditorFormIntoDraft() {
   const form = document.getElementById('recipe-editor-form');
   if (!form) return null;
@@ -865,6 +966,8 @@ function readEditorFormIntoDraft() {
     id: existingId,
     title: String(fd.get('title') || ''),
     dividerId: String(fd.get('dividerId') || state.dividers[0]?.id || 'weeknight'),
+    author: String(fd.get('author') || '').trim(),
+    cuisine: String(fd.get('cuisine') || '').trim(),
     source: String(fd.get('source') || ''),
     imageUrl: String(fd.get('imageUrl') || '').trim(),
     summary: String(fd.get('summary') || ''),
@@ -3057,6 +3160,11 @@ document.addEventListener('input', (event) => {
     state.scrapeError = '';
     return;
   }
+  if (target.id === 'import-video-url-input') {
+    state.importVideoUrl = target.value;
+    state.videoImportError = '';
+    return;
+  }
   if (target.id === 'paste-recipe-textarea') {
     state.pasteText = target.value;
     return;
@@ -3296,6 +3404,10 @@ document.addEventListener('submit', async (event) => {
     event.preventDefault();
     const urlInput = form.querySelector('#scrape-url-input');
     const url = String(urlInput?.value ?? state.importUrl ?? '').trim();
+    if (extractYouTubeId(url)) {
+      await importRecipeFromVideoUrl(url);
+      return;
+    }
     state.importUrl = url;
     state.isScraping = true;
     state.scrapeError = '';
@@ -3319,6 +3431,14 @@ document.addEventListener('submit', async (event) => {
       state.scrapeError = err?.message || 'Failed to scrape recipe webpage.';
     }
     render();
+    return;
+  }
+
+  if (formId === 'import-video-form') {
+    event.preventDefault();
+    const videoInput = form.querySelector('#import-video-url-input');
+    const videoUrl = String(videoInput?.value ?? state.importVideoUrl ?? '').trim();
+    await importRecipeFromVideoUrl(videoUrl);
     return;
   }
 

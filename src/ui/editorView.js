@@ -43,6 +43,29 @@ const CANNING_METHOD_OPTIONS = [
   'Dry / Vacuum Pantry',
 ];
 
+const COMMON_CUISINES = [
+  'American',
+  'Italian',
+  'Mexican',
+  'Mediterranean',
+  'Greek',
+  'French',
+  'Chinese',
+  'Japanese',
+  'Thai',
+  'Indian',
+  'Korean',
+  'Vietnamese',
+  'Middle Eastern',
+  'Cajun / Creole',
+  'Southern',
+  'Tex-Mex',
+  'Caribbean',
+  'German',
+  'Spanish',
+  'British',
+];
+
 export function renderEditorView({
   recipe,
   dividers,
@@ -56,6 +79,8 @@ export function renderEditorView({
     title: '',
     dividerId: dividers?.[0]?.id || 'weeknight',
     summary: '',
+    author: '',
+    cuisine: '',
     source: '',
     imageUrl: '',
     prepMinutes: 10,
@@ -205,6 +230,9 @@ export function renderEditorView({
         <datalist id="common-cooking-methods">
           ${COMMON_COOKING_METHODS.map((name) => `<option value="${escapeHtml(name)}"></option>`).join('')}
         </datalist>
+        <datalist id="common-cuisines">
+          ${COMMON_CUISINES.map((name) => `<option value="${escapeHtml(name)}"></option>`).join('')}
+        </datalist>
 
         <details
           class="editor-collapsible editor-ai-box"
@@ -308,6 +336,29 @@ export function renderEditorView({
               min="0"
               step="1"
               value="${escapeHtml(String(activeRecipe.prepMinutes ?? 0))}"
+            />
+          </div>
+
+          <div class="form-field">
+            <label for="rec-cuisine">Cuisine (optional)</label>
+            <input
+              id="rec-cuisine"
+              name="cuisine"
+              type="text"
+              list="common-cuisines"
+              value="${escapeHtml(activeRecipe.cuisine || '')}"
+              placeholder="e.g., Italian, Mexican, Thai, American"
+            />
+          </div>
+
+          <div class="form-field">
+            <label for="rec-author">Author / Chef / Channel</label>
+            <input
+              id="rec-author"
+              name="author"
+              type="text"
+              value="${escapeHtml(activeRecipe.author || '')}"
+              placeholder="e.g., Chef John, Budget Bytes, Grandma"
             />
           </div>
 

@@ -213,12 +213,23 @@ function renderClassicSheet({
     <article class="classic-sheet-card ${extraClass}">
       <header class="classic-sheet-header">
         <div class="classic-sheet-top">
-          <span class="classic-kicker">${escapeHtml(dividerName)}</span>
+          <span class="classic-kicker">${escapeHtml(dividerName)}${
+            recipe.cuisine ? ` · ${escapeHtml(recipe.cuisine)}` : ''
+          }</span>
         </div>
         <h1 class="classic-title">${escapeHtml(recipe.title)}</h1>
         ${
-          recipe.source
-            ? `<p class="classic-source">From: ${escapeHtml(recipe.source)}</p>`
+          recipe.author || recipe.source
+            ? `<p class="classic-source">${
+                recipe.author
+                  ? `By ${escapeHtml(recipe.author)}${
+                      recipe.source &&
+                      recipe.source.toLowerCase() !== recipe.author.toLowerCase()
+                        ? ` · From: ${escapeHtml(recipe.source)}`
+                        : ''
+                    }`
+                  : `From: ${escapeHtml(recipe.source)}`
+              }</p>`
             : ''
         }
         ${
@@ -747,6 +758,11 @@ export function renderDetailView({
           <div class="detail-header-top">
             <div class="card-badges-group">
               <span class="badge badge-divider">${escapeHtml(dividerName)}</span>
+              ${
+                recipe.cuisine
+                  ? `<span class="badge badge-cuisine">${escapeHtml(recipe.cuisine)}</span>`
+                  : ''
+              }
               <span class="badge badge-method">${escapeHtml(activeMethodBadgeLabel)}</span>
             </div>
             <span class="detail-updated">Updated ${escapeHtml(formatDateShort(recipe.updatedMs))}</span>
@@ -757,8 +773,17 @@ export function renderDetailView({
               <h1 class="detail-title">${escapeHtml(recipe.title)}</h1>
 
               ${
-                recipe.source
-                  ? `<p class="detail-source">Source: ${escapeHtml(recipe.source)}</p>`
+                recipe.author || recipe.source
+                  ? `<p class="detail-source">${
+                      recipe.author
+                        ? `By <strong>${escapeHtml(recipe.author)}</strong>${
+                            recipe.source &&
+                            recipe.source.toLowerCase() !== recipe.author.toLowerCase()
+                              ? ` · Source: ${escapeHtml(recipe.source)}`
+                              : ''
+                          }`
+                        : `Source: ${escapeHtml(recipe.source)}`
+                    }</p>`
                   : ''
               }
               ${
@@ -776,28 +801,32 @@ export function renderDetailView({
             }
           </div>
 
-          <div class="detail-kpi-strip">
-            <div class="kpi-box">
-              <span class="kpi-label">Prep</span>
-              <span class="kpi-value">${escapeHtml(formatMinutes(recipe.prepMinutes))}</span>
+          <div class="detail-meta-strip">
+            <div class="detail-meta-stats" aria-label="Recipe timing and yield">
+              <div class="meta-stat">
+                <span class="meta-stat-label">Prep</span>
+                <span class="meta-stat-value">${escapeHtml(formatMinutes(recipe.prepMinutes))}</span>
+              </div>
+              <div class="meta-stat">
+                <span class="meta-stat-label">Cook</span>
+                <span class="meta-stat-value">${escapeHtml(formatMinutes(activeCookMin))}</span>
+              </div>
+              <div class="meta-stat">
+                <span class="meta-stat-label">Total</span>
+                <span class="meta-stat-value">${escapeHtml(formatMinutes(totalMin))}</span>
+              </div>
+              <div class="meta-stat meta-stat-yield">
+                <span class="meta-stat-label">Yield</span>
+                <span class="meta-stat-value">${escapeHtml(scaledServings)}${
+                  recipe.servingSize
+                    ? ` <span class="meta-stat-sub">(${escapeHtml(recipe.servingSize)})</span>`
+                    : ' srv'
+                }</span>
+              </div>
             </div>
-            <div class="kpi-box">
-              <span class="kpi-label">Cook (${escapeHtml(activeMethodBadgeLabel)})</span>
-              <span class="kpi-value">${escapeHtml(formatMinutes(activeCookMin))}</span>
-            </div>
-            <div class="kpi-box">
-              <span class="kpi-label">Total</span>
-              <span class="kpi-value">${escapeHtml(formatMinutes(totalMin))}</span>
-            </div>
-            <div class="kpi-box">
-              <span class="kpi-label">Yield (${scaleFactor}x)</span>
-              <span class="kpi-value">${escapeHtml(scaledServings)} servings${
-                recipe.servingSize ? ` · ${escapeHtml(recipe.servingSize)}` : ''
-              }</span>
-            </div>
-            <div class="kpi-box kpi-scale-box">
-              <span class="kpi-label">Scale Batch</span>
-              <div class="seg-control" role="group" aria-label="Scale recipe">
+            <div class="detail-scale-inline">
+              <span class="meta-stat-label">Scale</span>
+              <div class="seg-control seg-control-compact" role="group" aria-label="Scale recipe">
                 ${scaleButtonsHtml}
               </div>
             </div>

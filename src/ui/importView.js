@@ -5,6 +5,9 @@ export function renderImportView({
   urlInput = '',
   isScraping = false,
   scrapeError = '',
+  videoUrlInput = '',
+  isImportingVideo = false,
+  videoImportError = '',
   pasteText = '',
   saveImmediately = false,
   isDragOver = false,
@@ -23,7 +26,7 @@ export function renderImportView({
       <div class="panel-card">
         <h2>1. Scrape a Cooking Website URL</h2>
         <p class="muted">
-          Paste a recipe webpage URL to extract structured ingredients, steps, timings, and servings (works with Schema.org / JSON-LD recipe pages).
+          Paste a recipe webpage URL to extract structured ingredients, steps, timings, cuisine, and author (works with Schema.org / JSON-LD recipe pages).
         </p>
         <form id="scrape-url-form" class="scrape-form">
           <div class="scrape-form-row">
@@ -52,7 +55,46 @@ export function renderImportView({
       </div>
 
       <div class="panel-card">
-        <h2>2. Drop or Browse Existing Files (.md, .txt, .json)</h2>
+        <h2>2. Create Recipe from a Cooking Video (YouTube)</h2>
+        <p class="muted">
+          Paste a YouTube video link to fetch its clean caption transcript, video title, and channel author. With AI enabled (Ollama or Gemini), it auto-extracts ingredients, steps &amp; cuisine; offline it opens the transcript in the Recipe Editor for manual cleanup.
+        </p>
+        <form id="import-video-form" class="scrape-form">
+          <div class="scrape-form-row">
+            <label for="import-video-url-input" class="sr-only">YouTube video URL</label>
+            <input
+              id="import-video-url-input"
+              name="videoUrl"
+              type="text"
+              inputmode="url"
+              value="${escapeHtml(videoUrlInput)}"
+              placeholder="https://www.youtube.com/watch?v=..."
+              ${isImportingVideo ? 'disabled' : ''}
+            />
+            <button type="submit" class="btn btn-primary" ${isImportingVideo ? 'disabled' : ''}>
+              ${isImportingVideo ? 'Fetching Video…' : 'Fetch & Convert Video'}
+            </button>
+          </div>
+        </form>
+        <div class="btn-row" style="margin-top: 10px;">
+          <button
+            type="button"
+            class="badge ai-status-pill ${aiReady ? 'is-ready' : ''}"
+            data-action="open-ai-settings"
+            title="Configure Ollama or Gemini API in Sync & Backup"
+          >${escapeHtml(aiLabel)} · Configure →</button>
+        </div>
+        ${
+          videoImportError
+            ? `<div class="callout-box callout-danger" style="margin-top: 10px; margin-bottom: 0;">${escapeHtml(
+                videoImportError
+              )}</div>`
+            : ''
+        }
+      </div>
+
+      <div class="panel-card">
+        <h2>3. Drop or Browse Existing Files (.md, .txt, .json)</h2>
         <p class="muted">
           Drop one or multiple Markdown (<code>.md</code>), plain text (<code>.txt</code>), HTML (<code>.html</code>), or JSON backup/recipe files directly from your computer.
         </p>
@@ -83,7 +125,7 @@ export function renderImportView({
       </div>
 
       <div class="panel-card">
-        <h2>3. Copy &amp; Paste Recipe Text</h2>
+        <h2>4. Copy &amp; Paste Recipe Text</h2>
         <p class="muted">
           Copy a recipe from any webpage, email, PDF, or notes app and paste it below. Both titled sections (<code>Ingredients</code> / <code>Directions</code>) and plain unstructured lists are converted automatically.
         </p>
