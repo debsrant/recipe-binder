@@ -1,4 +1,5 @@
-import { normalizeRecipe, parseTagsInput } from './collection.js';
+import { getRecipeMethods, normalizeRecipe, parseTagsInput } from './collection.js';
+import { convertIngredientLine } from './units.js';
 
 export const AI_PROVIDERS = [
   { id: 'off', label: 'Off (Offline Only)' },
@@ -12,12 +13,39 @@ export const GEMINI_MODELS = [
   { id: 'gemini-4-argon', label: 'Gemini 4 Argon (Stronger Reasoning)' },
 ];
 
+export const METHOD_CONVERSION_PRESETS = [
+  'Air Fryer',
+  'Instant Pot',
+  'Slow Cooker',
+  'Oven',
+  'Stovetop',
+  'Grill',
+];
+
+export const COOK_QA_QUICK_PROMPTS = [
+  'Can I prep this ahead?',
+  'How do I know when it is done?',
+  'Best swap if I am missing an ingredient?',
+  'How should I store and reheat leftovers?',
+];
+
 export const DEFAULT_AI_CONFIG = {
   provider: 'off',
   ollamaUrl: '',
   ollamaModel: 'llama3.2',
   geminiModel: 'gemini-4-hydrogen',
   geminiApiKey: '',
+};
+
+const METHOD_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    cookMinutes: { type: 'number' },
+    note: { type: 'string' },
+    steps: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['name', 'steps'],
 };
 
 const PROVIDER_SET = new Set(AI_PROVIDERS.map((p) => p.id));
@@ -570,6 +598,200 @@ export async function summarizeNoteWithAi({ title = '', text = '', config }) {
     title ? `Title: ${title}` : '',
     'Summarize the key cooking takeaways from this transcript:',
     cleanText.slice(0, 18000),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  return callAiCompletion({
+    systemInstruction,
+    userPrompt,
+    responseSchema: null,
+    config,
+  });
+}
+
+/**
+ * Formats a recipe (with current scale, unit conversion, and active method) into clean AI prompt text.
+ */
+export function buildRecipePromptContext({
+  recipe,
+  activeMethodIndex = 0,
+  scaleFactor = 1,
+  unitMode = 'original',
+} = {}) {
+  if (!recipe) return '';
+  const methods = getRecipeMethods(recipe);
+  const idx = Math.min(Math.max(0, Number(activeMethodIndex) || 0), methods.length - 1);
+  const activeMethod = methods[idx] || methods[0];
+  const scaledServings = Math.max(0.5, Number(recipe.servings || 4) * (Number(scaleFactor) || 1));
+
+  const ingredients = (recipe.ingredients || []).map((line) =>
+    convertIngredientLine(line, unitMode, scaleFactor)
+  );
+  const steps = (activeMethod?.steps || []).map((s, i) => `${i + 1}. ${s}`);
+
+  return [
+    `Recipe: ${recipe.title}`,
+    recipe.summary ? `Summary: ${recipe.summary}` : '',
+    `Prep Minutes: ${recipe.prepMinutes || 0}`,
+    `Current Method: ${activeMethod?.name || 'Standard'} (${activeMethod?.cookMinutes || 0} min cook)`,
+    activeMethod?.note ? `Method Note: ${activeMethod.note}` : '',
+    `Scaled Yield (${scaleFactor}x): ${scaledServings} servings${
+      recipe.servingSize ? ` (${recipe.servingSize})` : ''
+    }`,
+    ingredients.length > 0 ? `Ingredients:\n${ingredients.map((l) => `- ${l}`).join('\n')}` : '',
+    steps.length > 0 ? `Instructions:\n${steps.join('\n')}` : '',
+    recipe.notes ? `Cook's Margin Notes: ${recipe.notes}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/**
+ * Normalizes a generated cooking method object from AI JSON output.
+ */
+export function aiJsonToRecipeMethod(aiObj, { targetMethodName = '', existingMethods = [] } = {}) {
+  const src = aiObj && typeof aiObj === 'object' ? aiObj : {};
+  const name = String(src.name || targetMethodName || '').trim() || 'Adapted Method';
+  const steps = Array.isArray(src.steps)
+    ? src.steps.map((s) => String(s || '').trim()).filter(Boolean)
+    : [];
+  if (steps.length === 0) {
+    throw new Error('AI did not return any cooking steps for the new method.');
+  }
+
+  const baseId =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'method';
+  const usedIds = new Set((existingMethods || []).map((m) => m.id).filter(Boolean));
+  let id = baseId;
+  let suffix = 2;
+  while (usedIds.has(id)) {
+    id = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+
+  return {
+    id,
+    name,
+    cookMinutes: Math.max(0, Math.round(Number(src.cookMinutes) || 0)),
+    note: String(src.note || '').trim(),
+    steps,
+  };
+}
+
+/**
+ * Appends a generated cooking method to a recipe (labeling an unnamed first method as Original).
+ */
+export function appendGeneratedMethodToRecipe(recipe, newMethod) {
+  const currentMethods = getRecipeMethods(recipe).map((m, idx) => ({
+    ...m,
+    id: m.id || `method-${idx + 1}`,
+    name: idx === 0 && !String(m.name || '').trim() ? 'Original' : String(m.name || '').trim(),
+  }));
+  const nextMethods = [...currentMethods, newMethod];
+  return {
+    recipe: {
+      ...recipe,
+      methods: nextMethods,
+      cookMinutes: nextMethods[0].cookMinutes,
+      steps: nextMethods[0].steps,
+    },
+    newMethodIndex: nextMethods.length - 1,
+  };
+}
+
+/**
+ * Adapts a recipe to a new cooking appliance or method (e.g. Air Fryer, Instant Pot) via AI.
+ */
+export async function generateCookingMethodWithAi({
+  recipe,
+  activeMethodIndex = 0,
+  targetMethod,
+  scaleFactor = 1,
+  unitMode = 'original',
+  config,
+}) {
+  const cleanTarget = String(targetMethod || '').trim();
+  if (!cleanTarget) {
+    throw new Error('Enter or pick a target cooking method first (e.g., Air Fryer, Instant Pot).');
+  }
+
+  const contextText = buildRecipePromptContext({
+    recipe,
+    activeMethodIndex,
+    scaleFactor,
+    unitMode,
+  });
+
+  const systemInstruction =
+    'You are a practical culinary adaptation expert. Adapt the given recipe cleanly for the requested cooking appliance or method, adjusting temperatures, times, and liquid/preheat steps appropriately. Return ONLY a single valid JSON object.';
+
+  const userPrompt = [
+    `Adapt this recipe into a "${cleanTarget}" method.`,
+    'Return JSON matching:',
+    '{',
+    `  "name": "${cleanTarget}",`,
+    '  "cookMinutes": 18,',
+    '  "note": "Brief tip about rack placement, liquid amount, or crispiness",',
+    '  "steps": ["Step 1...", "Step 2..."]',
+    '}',
+    '',
+    contextText,
+  ].join('\n');
+
+  const rawText = await callAiCompletion({
+    systemInstruction,
+    userPrompt,
+    responseSchema: METHOD_RESPONSE_SCHEMA,
+    config,
+  });
+
+  const parsed = extractJsonObjectFromText(rawText);
+  return aiJsonToRecipeMethod(parsed, {
+    targetMethodName: cleanTarget,
+    existingMethods: getRecipeMethods(recipe),
+  });
+}
+
+/**
+ * Answers a contextual cooking question grounded in the currently open (and scaled) recipe.
+ */
+export async function askAboutRecipeWithAi({
+  recipe,
+  activeMethodIndex = 0,
+  scaleFactor = 1,
+  unitMode = 'original',
+  question,
+  history = [],
+  config,
+}) {
+  const cleanQuestion = String(question || '').trim();
+  if (!cleanQuestion) {
+    throw new Error('Enter a question about this recipe first.');
+  }
+
+  const contextText = buildRecipePromptContext({
+    recipe,
+    activeMethodIndex,
+    scaleFactor,
+    unitMode,
+  });
+
+  const recentHistory = (history || [])
+    .slice(-6)
+    .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'Cook'}: ${m.text}`)
+    .join('\n');
+
+  const systemInstruction =
+    'You are a helpful kitchen co-pilot assisting someone actively cooking this recipe. Give clear, concise, practical guidance grounded in the provided ingredients, quantities, and instructions. Keep answers scannable.';
+
+  const userPrompt = [
+    contextText,
+    recentHistory ? `Recent Conversation:\n${recentHistory}` : '',
+    `Question: ${cleanQuestion}`,
   ]
     .filter(Boolean)
     .join('\n\n');

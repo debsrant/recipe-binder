@@ -1,3 +1,9 @@
+import {
+  COOK_QA_QUICK_PROMPTS,
+  METHOD_CONVERSION_PRESETS,
+  getAiStatusLabel,
+  isAiReady,
+} from '../lib/ai.js';
 import { getRecipeMethods } from '../lib/collection.js';
 import { formatQuantity } from '../lib/scaling.js';
 import { renderLinkedStepHtml } from '../lib/techniques.js';
@@ -211,6 +217,164 @@ function renderClassicSheet({
   `;
 }
 
+function renderCookAiPanel({
+  aiConfig,
+  cookAiOpen = false,
+  cookMethodTarget = 'Air Fryer',
+  isGeneratingMethod = false,
+  cookQaMessages = [],
+  cookQaInput = '',
+  isAskingCookQa = false,
+  cookAiError = '',
+  existingMethods = [],
+}) {
+  const aiReady = isAiReady(aiConfig);
+  const aiLabel = getAiStatusLabel(aiConfig);
+  const existingNames = new Set(
+    (existingMethods || []).map((m) => String(m?.name || '').trim().toLowerCase()).filter(Boolean)
+  );
+
+  const presetButtons = METHOD_CONVERSION_PRESETS.map((name) => {
+    const active = String(cookMethodTarget || '').trim().toLowerCase() === name.toLowerCase();
+    const alreadyExists = existingNames.has(name.toLowerCase());
+    return `<button
+      type="button"
+      class="tag-pill ${active ? 'is-active' : ''}"
+      data-action="select-cook-method-preset"
+      data-method-name="${escapeHtml(name)}"
+      title="${alreadyExists ? `${name} already exists — click to generate another variant` : `Adapt for ${name}`}"
+    >${escapeHtml(name)}${alreadyExists ? ' ✓' : ''}</button>`;
+  }).join('');
+
+  const quickPromptButtons = COOK_QA_QUICK_PROMPTS.map(
+    (q) =>
+      `<button type="button" class="tag-chip" data-action="cook-qa-quick-ask" data-question="${escapeHtml(
+        q
+      )}" ${isAskingCookQa ? 'disabled' : ''}>${escapeHtml(q)}</button>`
+  ).join('');
+
+  const threadHtml =
+    cookQaMessages.length > 0
+      ? `<div class="cook-qa-thread">
+          ${cookQaMessages
+            .map(
+              (m) => `<div class="cook-qa-msg ${
+                m.role === 'assistant' ? 'is-assistant' : 'is-user'
+              }">
+                <span class="cook-qa-role">${m.role === 'assistant' ? 'AI Cook Assistant' : 'You'}</span>
+                <div>${escapeHtml(m.text)}</div>
+              </div>`
+            )
+            .join('')}
+        </div>`
+      : '';
+
+  return `
+    <section
+      id="cook-ai-panel"
+      class="panel-card ref-card cook-ai-panel no-print ${cookAiOpen ? '' : 'is-collapsed'}"
+    >
+      <div class="ref-card-header">
+        <div class="ref-card-title-group">
+          <button
+            type="button"
+            class="ref-card-title-btn"
+            data-action="toggle-cook-ai"
+            aria-expanded="${cookAiOpen ? 'true' : 'false'}"
+          >
+            <h2>AI Cook Assistant</h2>
+          </button>
+          <button
+            type="button"
+            class="badge ai-status-pill ${aiReady ? 'is-ready' : ''}"
+            data-action="open-ai-settings"
+            title="Configure Local Ollama or Gemini API in Sync & Backup"
+          >${escapeHtml(aiLabel)} · Settings →</button>
+        </div>
+        <div class="ref-card-controls">
+          <button
+            type="button"
+            class="btn btn-sm btn-outline ref-collapse-btn"
+            data-action="toggle-cook-ai"
+            aria-expanded="${cookAiOpen ? 'true' : 'false'}"
+          >${cookAiOpen ? 'Close ▴' : 'Open ▾'}</button>
+        </div>
+      </div>
+
+      <div class="ref-card-body">
+        ${
+          cookAiError
+            ? `<div class="callout-box callout-danger" style="margin-bottom: 10px;">${escapeHtml(
+                cookAiError
+              )}</div>`
+            : ''
+        }
+        <div class="cook-ai-sections">
+          <div class="cook-ai-section">
+            <h3>Generate New Cooking Method Tab</h3>
+            <p class="muted" style="margin: 0 0 8px;">
+              Adapt this recipe for another appliance and save it as a new tab on this card.
+            </p>
+            <div class="flavor-chip-row" aria-label="Cooking method presets">
+              ${presetButtons}
+            </div>
+            <form id="cook-generate-method-form" class="cook-method-form-row">
+              <label for="cook-method-target-input" class="sr-only">Target cooking method</label>
+              <input
+                id="cook-method-target-input"
+                name="targetMethod"
+                type="text"
+                value="${escapeHtml(cookMethodTarget)}"
+                placeholder="e.g., Air Fryer, Instant Pot, Dutch Oven..."
+                ${isGeneratingMethod ? 'disabled' : ''}
+              />
+              <button
+                type="submit"
+                class="btn btn-primary btn-sm"
+                ${isGeneratingMethod ? 'disabled' : ''}
+              >${isGeneratingMethod ? 'Generating Method…' : '+ Generate Method Tab'}</button>
+            </form>
+          </div>
+
+          <div class="cook-ai-section">
+            <div class="section-header-row" style="margin-bottom: 4px;">
+              <h3 style="margin: 0;">Ask About This Recipe</h3>
+              ${
+                cookQaMessages.length > 0
+                  ? '<button type="button" class="btn btn-sm btn-secondary" data-action="cook-qa-clear">Clear</button>'
+                  : ''
+              }
+            </div>
+            <p class="muted" style="margin: 0 0 8px;">
+              Uses your current batch scale, converted units, active method, and margin notes.
+            </p>
+            <div class="flavor-chip-row">
+              ${quickPromptButtons}
+            </div>
+            ${threadHtml}
+            <form id="cook-ai-qa-form" class="cook-qa-form-row">
+              <label for="cook-qa-input" class="sr-only">Ask a question about this recipe</label>
+              <input
+                id="cook-qa-input"
+                name="question"
+                type="text"
+                value="${escapeHtml(cookQaInput)}"
+                placeholder="Ask e.g., 'Can I use dried herbs instead?' or 'Sauce looks thin—fix?'"
+                ${isAskingCookQa ? 'disabled' : ''}
+              />
+              <button
+                type="submit"
+                class="btn btn-primary btn-sm"
+                ${isAskingCookQa ? 'disabled' : ''}
+              >${isAskingCookQa ? 'Thinking…' : 'Ask'}</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 export function renderDetailView({
   recipe,
   dividers,
@@ -225,6 +389,14 @@ export function renderDetailView({
   printMethodsMode = 'selected',
   techniques,
   linkedNotes = [],
+  aiConfig = null,
+  cookAiOpen = false,
+  cookMethodTarget = 'Air Fryer',
+  isGeneratingMethod = false,
+  cookQaMessages = [],
+  cookQaInput = '',
+  isAskingCookQa = false,
+  cookAiError = '',
 }) {
   if (!recipe || recipe.deleted) {
     return `
@@ -316,6 +488,11 @@ export function renderDetailView({
         <button type="button" class="btn btn-outline" data-action="export-recipe-md" data-recipe-id="${escapeHtml(
           recipe.id
         )}">Export .md</button>
+        <button
+          type="button"
+          class="btn ${cookAiOpen ? 'btn-primary' : 'btn-outline'}"
+          data-action="toggle-cook-ai"
+        >AI Cook Assistant</button>
         ${printToggleHtml}
         <button type="button" class="btn btn-primary" data-action="print-recipe">Print Recipe</button>
         <button type="button" class="btn btn-danger-outline" data-action="delete-recipe" data-recipe-id="${escapeHtml(
@@ -324,6 +501,18 @@ export function renderDetailView({
       </div>
     </div>
   `;
+
+  const cookAiPanelHtml = renderCookAiPanel({
+    aiConfig,
+    cookAiOpen,
+    cookMethodTarget,
+    isGeneratingMethod,
+    cookQaMessages,
+    cookQaInput,
+    isAskingCookQa,
+    cookAiError,
+    existingMethods: methods,
+  });
 
   if (isClassic) {
     const classicBodyHtml = printAllMethods
@@ -380,6 +569,7 @@ export function renderDetailView({
             ${unitButtonsHtml}
           </div>
         </div>
+        ${cookAiPanelHtml}
         ${classicBodyHtml}
       </section>
     `;
@@ -610,6 +800,7 @@ export function renderDetailView({
                 ${stepsHtml}
               </ol>
             </section>
+            ${cookAiPanelHtml}
           </div>
         </div>
       </div>

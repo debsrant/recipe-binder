@@ -2998,6 +2998,82 @@ textarea {
   font-weight: 700;
 }
 
+/* Step 3: Cook Mode AI Assistant */
+.cook-ai-panel {
+  margin-top: 14px;
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+}
+
+.cook-ai-sections {
+  display: grid;
+  gap: 14px;
+}
+
+.cook-ai-section {
+  padding: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.cook-ai-section h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.cook-method-form-row,
+.cook-qa-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.cook-method-form-row input,
+.cook-qa-form-row input {
+  flex: 1;
+  min-width: 200px;
+}
+
+.cook-qa-thread {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  margin-top: 10px;
+  padding-right: 4px;
+}
+
+.cook-qa-msg {
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  font-size: 13.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.cook-qa-msg.is-user {
+  border-left: 3px solid var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, var(--bg-card));
+}
+
+.cook-qa-msg.is-assistant {
+  border-left: 3px solid var(--pine);
+}
+
+.cook-qa-role {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
 /* Print Recipe Sheet */
 @page {
   margin: 0.6in;

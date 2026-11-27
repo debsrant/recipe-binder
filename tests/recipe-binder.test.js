@@ -31,6 +31,9 @@ import {
 import { validateRecipeUrl } from '../src/lib/webScraper.js';
 import {
   aiJsonToRecipeDraft,
+  aiJsonToRecipeMethod,
+  appendGeneratedMethodToRecipe,
+  buildRecipePromptContext,
   extractGeminiInteractionText,
   extractJsonObjectFromText,
   normalizeAiConfig,
@@ -1452,4 +1455,46 @@ test('AI config normalization, Gemini v1 response extraction, and recipe draft m
   assert.equal(draft.methods[0].name, 'Air Fryer');
   assert.equal(draft.methods[0].cookMinutes, 18);
   assert.deepEqual(draft.ingredients, ['14 oz tofu']);
+});
+
+test('Step 3 Cook Mode AI helpers build context, normalize generated methods, and append cleanly', () => {
+  const baseRecipe = normalizeRecipe({
+    id: 'rec-salmon',
+    title: 'Garlic Herb Salmon',
+    prepMinutes: 10,
+    servings: 2,
+    servingSize: '1 fillet',
+    ingredients: ['2 salmon fillets', '1 tbsp olive oil'],
+    steps: ['Rub salmon with oil.', 'Bake at 400 F for 14 min.'],
+    cookMinutes: 14,
+    notes: 'Pat dry before seasoning.',
+  });
+
+  const ctx = buildRecipePromptContext({
+    recipe: baseRecipe,
+    scaleFactor: 2,
+    unitMode: 'original',
+  });
+  assert.ok(ctx.includes('Garlic Herb Salmon'));
+  assert.ok(ctx.includes('Scaled Yield (2x): 4 servings'));
+  assert.ok(ctx.includes('4 salmon fillets'));
+  assert.ok(ctx.includes('Pat dry before seasoning.'));
+
+  const newMethod = aiJsonToRecipeMethod(
+    {
+      name: 'Air Fryer',
+      cookMinutes: 9,
+      note: 'No need to preheat.',
+      steps: ['Place salmon in basket.', 'Air fry at 390 F for 8-9 min.'],
+    },
+    { existingMethods: getRecipeMethods(baseRecipe) }
+  );
+  assert.equal(newMethod.id, 'air-fryer');
+  assert.equal(newMethod.cookMinutes, 9);
+
+  const appended = appendGeneratedMethodToRecipe(baseRecipe, newMethod);
+  assert.equal(appended.newMethodIndex, 1);
+  assert.equal(appended.recipe.methods.length, 2);
+  assert.equal(appended.recipe.methods[0].name, 'Original');
+  assert.equal(appended.recipe.methods[1].name, 'Air Fryer');
 });
