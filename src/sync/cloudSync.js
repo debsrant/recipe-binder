@@ -27,6 +27,7 @@ import { mergeCollectionSnapshots, normalizeDivider, normalizeRecipe } from '../
 import { normalizeReferenceData } from '../lib/reference.js';
 import { normalizeMealPrepData } from '../lib/mealPrep.js';
 import { normalizePantryData } from '../lib/pantry.js';
+import { normalizeNotesData } from '../lib/notes.js';
 
 const CLIENT_ID =
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -146,6 +147,14 @@ async function writePantryDoc(uid, pantryData) {
   await setDoc(getStageDocRef(uid), payload, { merge: true });
 }
 
+async function writeNotesDoc(uid, notesData) {
+  const payload = {
+    notesData: normalizeNotesData(notesData),
+    updatedBy: CLIENT_ID,
+  };
+  await setDoc(getStageDocRef(uid), payload, { merge: true });
+}
+
 async function writeRecipeDoc(uid, recipe, fallbackDividerId) {
   const payload = {
     ...normalizeRecipe(recipe, fallbackDividerId),
@@ -188,6 +197,7 @@ async function startUserSync(user) {
       referenceData: remoteMeta?.referenceData || null,
       mealPrepData: remoteMeta?.mealPrepData || null,
       pantryData: remoteMeta?.pantryData || null,
+      notesData: remoteMeta?.notesData || null,
       recipes: remoteRecipes,
     };
 
@@ -232,6 +242,24 @@ async function startUserSync(user) {
       (!remoteMeta?.pantryData || localPantryMs > remotePantryMs)
     ) {
       pendingWrites.push(writePantryDoc(user.uid, merged.pantryData));
+    }
+
+    const localNotesMs = Math.max(
+      maxUpdated(merged.notesData?.items),
+      Number(merged.notesData?.googleDriveUpdatedMs || 0),
+      Number(merged.notesData?.updatedMs || 0)
+    );
+    const remoteNotesMs = Math.max(
+      maxUpdated(remoteMeta?.notesData?.items),
+      Number(remoteMeta?.notesData?.googleDriveUpdatedMs || 0),
+      Number(remoteMeta?.notesData?.updatedMs || 0)
+    );
+    if (
+      merged.notesData &&
+      localNotesMs > 0 &&
+      (!remoteMeta?.notesData || localNotesMs > remoteNotesMs)
+    ) {
+      pendingWrites.push(writeNotesDoc(user.uid, merged.notesData));
     }
 
     for (const recipe of merged.recipes) {
@@ -281,6 +309,7 @@ async function startUserSync(user) {
         referenceData: data?.referenceData || null,
         mealPrepData: data?.mealPrepData || null,
         pantryData: data?.pantryData || null,
+        notesData: data?.notesData || null,
         recipes: [],
       });
       await callbacks.onMergedSnapshot(merged);
@@ -483,6 +512,24 @@ export async function pushPantryDataToCloud(pantryData) {
   }
 }
 
+export async function pushNotesDataToCloud(notesData) {
+  if (!IS_FIREBASE_CONFIGURED || !auth?.currentUser || !db) return;
+  emitStatus({ status: navigator.onLine ? 'syncing' : 'offline' });
+  try {
+    await writeNotesDoc(auth.currentUser.uid, notesData);
+    emitStatus({
+      status: navigator.onLine ? 'synced' : 'offline',
+      lastSyncedAt: nowTimeLabel(),
+      error: '',
+    });
+  } catch (err) {
+    emitStatus({
+      status: navigator.onLine ? 'error' : 'offline',
+      error: formatAuthError(err),
+    });
+  }
+}
+
 export async function forceSyncAllToCloud(snapshot) {
   if (!IS_FIREBASE_CONFIGURED || !auth?.currentUser || !db) return;
   emitStatus({ status: navigator.onLine ? 'syncing' : 'offline', error: '' });
@@ -498,6 +545,9 @@ export async function forceSyncAllToCloud(snapshot) {
     }
     if (snapshot?.pantryData) {
       await writePantryDoc(uid, snapshot.pantryData);
+    }
+    if (snapshot?.notesData) {
+      await writeNotesDoc(uid, snapshot.notesData);
     }
     await Promise.all((snapshot?.recipes || []).map((r) => writeRecipeDoc(uid, r, fallbackId)));
     emitStatus({

@@ -1,6 +1,7 @@
 import { mergeReferenceData } from './reference.js';
 import { mergeMealPrepData } from './mealPrep.js';
 import { mergePantryData } from './pantry.js';
+import { mergeNotesData } from './notes.js';
 
 /**
  * Normalizes a single tag into lowercase kebab-case without leading hashes.
@@ -328,6 +329,12 @@ export function mergeCollectionSnapshots(localSnapshot, remoteSnapshot) {
     merged.pantryData = mergePantryData(
       localSnapshot?.pantryData,
       remoteSnapshot?.pantryData
+    );
+  }
+  if (localSnapshot?.notesData || remoteSnapshot?.notesData) {
+    merged.notesData = mergeNotesData(
+      localSnapshot?.notesData,
+      remoteSnapshot?.notesData
     );
   }
   return merged;

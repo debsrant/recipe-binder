@@ -5,6 +5,7 @@ import { normalizeDivider, normalizeRecipe } from '../lib/collection.js';
 import { getDefaultReferenceData, normalizeReferenceData } from '../lib/reference.js';
 import { getDefaultMealPrepData, normalizeMealPrepData } from '../lib/mealPrep.js';
 import { getDefaultPantryData, normalizePantryData } from '../lib/pantry.js';
+import { getDefaultNotesData, normalizeNotesData } from '../lib/notes.js';
 
 export const db = new Dexie(DB_NAME);
 
@@ -38,17 +39,19 @@ export async function initDatabase() {
 }
 
 /**
- * Reads the full local snapshot (recipes including tombstones, ordered dividers, referenceData, mealPrepData, pantryData, and timestamp).
+ * Reads the full local snapshot (recipes including tombstones, ordered dividers, referenceData, mealPrepData, pantryData, notesData, and timestamp).
  */
 export async function getSnapshot() {
-  const [recipes, dividers, divMeta, refMeta, mealPrepMeta, pantryMeta] = await Promise.all([
-    db.recipes.toArray(),
-    db.dividers.orderBy('order').toArray(),
-    db.meta.get('dividersUpdatedMs'),
-    db.meta.get('referenceData'),
-    db.meta.get('mealPrepData'),
-    db.meta.get('pantryData'),
-  ]);
+  const [recipes, dividers, divMeta, refMeta, mealPrepMeta, pantryMeta, notesMeta] =
+    await Promise.all([
+      db.recipes.toArray(),
+      db.dividers.orderBy('order').toArray(),
+      db.meta.get('dividersUpdatedMs'),
+      db.meta.get('referenceData'),
+      db.meta.get('mealPrepData'),
+      db.meta.get('pantryData'),
+      db.meta.get('notesData'),
+    ]);
   return {
     recipes,
     dividers: dividers.length > 0 ? dividers : DEFAULT_DIVIDERS,
@@ -60,6 +63,9 @@ export async function getSnapshot() {
     pantryData: pantryMeta?.value
       ? normalizePantryData(pantryMeta.value)
       : getDefaultPantryData(),
+    notesData: notesMeta?.value
+      ? normalizeNotesData(notesMeta.value)
+      : getDefaultNotesData(),
   };
 }
 
@@ -181,6 +187,18 @@ export async function savePantryData(pantryInput) {
 }
 
 /**
+ * Saves updated kitchen notes, links, videos & Drive folder data.
+ */
+export async function saveNotesData(notesInput) {
+  const normalized = normalizeNotesData({
+    ...notesInput,
+    updatedMs: Date.now(),
+  });
+  await db.meta.put({ key: 'notesData', value: normalized });
+  return normalized;
+}
+
+/**
  * Applies a merged snapshot (from cloud sync or merge import) into IndexedDB.
  */
 export async function applyMergedSnapshot(snapshot) {
@@ -194,6 +212,7 @@ export async function applyMergedSnapshot(snapshot) {
   const hasRef = Boolean(snapshot?.referenceData);
   const hasMealPrep = Boolean(snapshot?.mealPrepData);
   const hasPantry = Boolean(snapshot?.pantryData);
+  const hasNotes = Boolean(snapshot?.notesData);
 
   await db.transaction('rw', db.dividers, db.recipes, db.meta, async () => {
     if (dividers.length > 0) {
@@ -221,6 +240,12 @@ export async function applyMergedSnapshot(snapshot) {
         value: normalizePantryData(snapshot.pantryData),
       });
     }
+    if (hasNotes) {
+      await db.meta.put({
+        key: 'notesData',
+        value: normalizeNotesData(snapshot.notesData),
+      });
+    }
     await db.meta.put({ key: 'dividersUpdatedMs', value: dividersUpdatedMs });
     await db.meta.put({ key: 'seeded', value: true, updatedMs: Date.now() });
   });
@@ -245,6 +270,7 @@ export async function replaceAllData(snapshot) {
   const hasRef = Boolean(snapshot?.referenceData);
   const hasMealPrep = Boolean(snapshot?.mealPrepData);
   const hasPantry = Boolean(snapshot?.pantryData);
+  const hasNotes = Boolean(snapshot?.notesData);
 
   await db.transaction('rw', db.dividers, db.recipes, db.meta, async () => {
     await db.dividers.clear();
@@ -271,6 +297,12 @@ export async function replaceAllData(snapshot) {
         value: normalizePantryData(snapshot.pantryData),
       });
     }
+    if (hasNotes) {
+      await db.meta.put({
+        key: 'notesData',
+        value: normalizeNotesData(snapshot.notesData),
+      });
+    }
     await db.meta.put({ key: 'dividersUpdatedMs', value: dividersUpdatedMs });
     await db.meta.put({ key: 'seeded', value: true, updatedMs: Date.now() });
   });
@@ -292,6 +324,7 @@ export async function resetToSeedData() {
     referenceData: getDefaultReferenceData(),
     mealPrepData: getDefaultMealPrepData(),
     pantryData: getDefaultPantryData(),
+    notesData: getDefaultNotesData(),
   });
 }
 
@@ -308,5 +341,6 @@ export async function clearAllTestData() {
     recipes: [],
     mealPrepData: getDefaultMealPrepData(),
     pantryData: getDefaultPantryData(),
+    notesData: getDefaultNotesData(),
   });
 }

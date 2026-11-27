@@ -31,6 +31,18 @@ import {
 import { validateRecipeUrl } from '../src/lib/webScraper.js';
 import { createZipBytes } from '../src/lib/zip.js';
 import {
+  deleteNoteItem,
+  extractGoogleDriveFileId,
+  extractVideoTimestamps,
+  extractYouTubeId,
+  filterAndSortNotes,
+  normalizeSafeUrl,
+  parseTimestampToSeconds,
+  parseYouTubeTranscriptPayload,
+  stripTranscriptTimestamps,
+  upsertNoteItem,
+} from '../src/lib/notes.js';
+import {
   FLAVOR_FAMILIES,
   FLAVOR_PAIRINGS,
   FOOD_STORAGE_CATEGORIES,
@@ -1264,4 +1276,131 @@ test('matchRecipesByIngredients ranks recipes by readiness, includes staples opt
   assert.equal(noStaples[0].matchedCount, 2);
   assert.equal(noStaples[0].missingCount, 2);
   assert.equal(noStaples[0].canMakeNow, false);
+});
+
+test('Notes URL, YouTube, Drive, and timestamp helpers extract IDs and seconds cleanly', () => {
+  assert.equal(normalizeSafeUrl('javascript:alert(1)'), '');
+  assert.equal(normalizeSafeUrl('seriouseats.com/pan-pizza'), 'https://seriouseats.com/pan-pizza');
+
+  assert.equal(extractYouTubeId('https://www.youtube.com/watch?v=dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+  assert.equal(extractYouTubeId('https://youtu.be/dQw4w9WgXcQ?t=42'), 'dQw4w9WgXcQ');
+  assert.equal(extractYouTubeId('https://youtube.com/shorts/dQw4w9WgXcQ'), 'dQw4w9WgXcQ');
+
+  assert.equal(
+    extractGoogleDriveFileId('https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view?usp=sharing'),
+    '1AbCdEfGhIjKlMnOpQrStUvWxYz'
+  );
+  assert.equal(
+    extractGoogleDriveFileId('https://drive.google.com/open?id=1AbCdEfGhIjKlMnOpQrStUvWxYz'),
+    '1AbCdEfGhIjKlMnOpQrStUvWxYz'
+  );
+
+  assert.equal(parseTimestampToSeconds('02:15'), 135);
+  assert.equal(parseTimestampToSeconds('1:02:03'), 3723);
+  assert.equal(parseTimestampToSeconds('bad'), null);
+
+  const jumps = extractVideoTimestamps('01:30 - brown butter\n04:05: fold dough\n01:30 duplicate');
+  assert.equal(jumps.length, 2);
+  assert.deepEqual(jumps[0], { label: '01:30', seconds: 90, text: 'brown butter' });
+  assert.deepEqual(jumps[1], { label: '04:05', seconds: 245, text: 'fold dough' });
+});
+
+test('Transcript cleaners and YouTube payload parsers strip all timestamps cleanly', () => {
+  const vtt = `WEBVTT
+Kind: captions
+Language: en
+
+1
+00:00:01.000 --> 00:00:04.200
+First preheat your oven to 450 &amp; oil the skillet.
+
+2
+[00:04] Watch the edges crisp up nicely.
+00:12 - Pull when golden.`;
+
+  const stripped = stripTranscriptTimestamps(vtt);
+  assert.ok(stripped.includes('First preheat your oven to 450 & oil the skillet.'));
+  assert.ok(stripped.includes('Watch the edges crisp up nicely.'));
+  assert.ok(stripped.includes('Pull when golden.'));
+  assert.equal(/\d{1,2}:\d{2}/.test(stripped), false);
+  assert.equal(stripped.includes('WEBVTT'), false);
+
+  const json3 = JSON.stringify({
+    events: [
+      { tStartMs: 1200, segs: [{ utf8: 'Warm the ' }, { utf8: 'butter gently.' }] },
+      { tStartMs: 4500, segs: [{ utf8: '[00:04] Whisk until foamy.' }] },
+    ],
+  });
+  const parsedJson3 = parseYouTubeTranscriptPayload(json3);
+  assert.equal(parsedJson3, 'Warm the butter gently. Whisk until foamy.');
+  assert.equal(/\d{1,2}:\d{2}/.test(parsedJson3), false);
+
+  const xml = '<transcript><text start="1.2" dur="2.0">Add garlic &amp; ginger.</text><text start="4.5" dur="1.8">00:04 Stir for 30 seconds.</text></transcript>';
+  const parsedXml = parseYouTubeTranscriptPayload(xml);
+  assert.equal(parsedXml, 'Add garlic & ginger. Stir for 30 seconds.');
+  assert.equal(/\d{1,2}:\d{2}/.test(parsedXml), false);
+});
+
+test('filterAndSortNotes pins first, auto-sorts A-Z, searches transcripts, and merges notesData', () => {
+  const items = [
+    { id: 'n1', type: 'note', title: 'Zucchini Brining', body: 'Salt strips.', updatedMs: 100 },
+    {
+      id: 'n2',
+      type: 'video',
+      title: 'Apple Tart Technique',
+      url: 'https://youtu.be/dQw4w9WgXcQ',
+      transcript: 'Brush apricot glaze while hot.',
+      tags: ['pastry'],
+      recipeIds: ['r-pie'],
+      updatedMs: 200,
+    },
+    { id: 'n3', type: 'website', title: 'Brine Ratios Chart', url: 'example.com/brine', updatedMs: 300 },
+  ];
+
+  // Unpinned sorted alphabetically: Apple Tart -> Brine Ratios -> Zucchini Brining
+  const alpha = filterAndSortNotes({ items });
+  assert.deepEqual(
+    alpha.map((i) => i.id),
+    ['n2', 'n3', 'n1']
+  );
+
+  // Pin Zucchini Brining -> moves to top while remaining stay A-Z
+  const withPin = filterAndSortNotes({ items, pinnedSet: new Set(['note-n1']) });
+  assert.deepEqual(
+    withPin.map((i) => i.id),
+    ['n1', 'n2', 'n3']
+  );
+
+  // Searches inside video transcripts
+  const transcriptSearch = filterAndSortNotes({ items, query: 'apricot glaze' });
+  assert.deepEqual(
+    transcriptSearch.map((i) => i.id),
+    ['n2']
+  );
+
+  const upserted = upsertNoteItem(items, { id: 'n1', type: 'note', title: 'Zucchini Update', body: 'Done.' });
+  const deleted = deleteNoteItem(upserted, 'n3');
+  assert.equal(deleted.find((i) => i.id === 'n3').deleted, true);
+
+  const mergedSnap = mergeCollectionSnapshots(
+    {
+      dividers: [],
+      recipes: [],
+      notesData: { googleDriveFolderUrl: '', googleDriveUpdatedMs: 0, items: [] },
+    },
+    {
+      dividers: [],
+      recipes: [],
+      notesData: {
+        googleDriveFolderUrl: 'https://drive.google.com/drive/folders/abc12345678',
+        googleDriveUpdatedMs: 500,
+        items: deleted,
+      },
+    }
+  );
+  assert.equal(
+    mergedSnap.notesData.googleDriveFolderUrl,
+    'https://drive.google.com/drive/folders/abc12345678'
+  );
+  assert.equal(mergedSnap.notesData.items.find((i) => i.id === 'n3').deleted, true);
 });

@@ -10,6 +10,7 @@ import {
   resetToSeedData,
   saveDividers,
   saveMealPrepData,
+  saveNotesData,
   savePantryData,
   saveRecipe,
   saveReferenceData,
@@ -34,6 +35,16 @@ import {
   upsertMealPrepItem,
 } from './lib/mealPrep.js';
 import {
+  deleteNoteItem,
+  extractYouTubeId,
+  getDefaultNotesData,
+  getYouTubeWatchUrl,
+  normalizeNoteItem,
+  normalizeSafeUrl,
+  stripTranscriptTimestamps,
+  upsertNoteItem,
+} from './lib/notes.js';
+import {
   cyclePantryStatus,
   deletePantryItem,
   extractCoreIngredientName,
@@ -54,6 +65,7 @@ import {
   normalizeTechnique,
   upsertReferenceItem,
 } from './lib/reference.js';
+import { fetchYouTubeTranscript } from './lib/transcript.js';
 import { fetchAndScrapeRecipeUrl } from './lib/webScraper.js';
 import { createZipBlob } from './lib/zip.js';
 import {
@@ -62,6 +74,7 @@ import {
   initCloudSync,
   pushDividersToCloud,
   pushMealPrepDataToCloud,
+  pushNotesDataToCloud,
   pushPantryDataToCloud,
   pushRecipeToCloud,
   pushReferenceDataToCloud,
@@ -84,6 +97,7 @@ import {
 } from './ui/helpers.js';
 import { renderImportView } from './ui/importView.js';
 import { renderMealPrepView } from './ui/mealPrepView.js';
+import { renderNotesView } from './ui/notesView.js';
 import { renderPantryView } from './ui/pantryView.js';
 import {
   renderConverterResultHtml,
@@ -160,6 +174,7 @@ const state = {
   referenceData: getDefaultReferenceData(),
   mealPrepData: getDefaultMealPrepData(),
   pantryData: getDefaultPantryData(),
+  notesData: getDefaultNotesData(),
   selectedRecipeId: null,
   editingRecipeId: null,
   draftRecipe: null,
@@ -190,6 +205,20 @@ const state = {
   matcherIncludeStaples: true,
   matcherFilter: 'all',
   matcherSearch: '',
+  notesTypeFilter: 'all',
+  notesTagFilter: '',
+  notesQuery: '',
+  editingNoteId: null,
+  draftNote: null,
+  editingDriveFolder: false,
+  notesPinnedCards: readSavedIdSet(PREF_KEYS.notesPinnedCards),
+  notesCollapsedCards: readSavedIdSet(PREF_KEYS.notesCollapsedCards),
+  notesPinnedOnly: false,
+  notesExpandedEmbeds: new Set(),
+  notesEmbedStartSeconds: new Map(),
+  notesExpandedTranscripts: new Set(),
+  isFetchingTranscript: false,
+  transcriptError: '',
   converter: {
     mode: 'volume-weight',
     value: '1',
@@ -340,6 +369,7 @@ function renderNavBar() {
         <button type="button" class="nav-tab ${state.view === 'import' ? 'is-active' : ''}" data-action="nav-view" data-view="import">Import</button>
         <button type="button" class="nav-tab ${state.view === 'mealprep' ? 'is-active' : ''}" data-action="nav-view" data-view="mealprep">Meal Prep</button>
         <button type="button" class="nav-tab ${state.view === 'pantry' ? 'is-active' : ''}" data-action="nav-view" data-view="pantry">Pantry</button>
+        <button type="button" class="nav-tab ${state.view === 'notes' ? 'is-active' : ''}" data-action="nav-view" data-view="notes">Notes</button>
         <button type="button" class="nav-tab ${state.view === 'reference' ? 'is-active' : ''}" data-action="nav-view" data-view="reference">Reference</button>
         <button type="button" class="nav-tab ${state.view === 'dividers' ? 'is-active' : ''}" data-action="nav-view" data-view="dividers">Dividers</button>
         <button type="button" class="nav-tab ${state.view === 'sync' ? 'is-active' : ''}" data-action="nav-view" data-view="sync">Sync & Backup</button>
@@ -365,6 +395,11 @@ function renderMainContent() {
 
   if (state.view === 'detail') {
     const recipe = state.recipes.find((r) => r.id === state.selectedRecipeId);
+    const linkedNotes = recipe
+      ? (state.notesData.items || []).filter(
+          (n) => !n.deleted && Array.isArray(n.recipeIds) && n.recipeIds.includes(recipe.id)
+        )
+      : [];
     return renderDetailView({
       recipe,
       dividers: state.dividers,
@@ -378,6 +413,7 @@ function renderMainContent() {
       activeMethodIndex: state.activeMethodIndex,
       printMethodsMode: state.printMethodsMode,
       techniques: state.referenceData.techniques,
+      linkedNotes,
     });
   }
 
@@ -438,6 +474,27 @@ function renderMainContent() {
     });
   }
 
+  if (state.view === 'notes') {
+    return renderNotesView({
+      notesData: state.notesData,
+      recipes: state.recipes,
+      typeFilter: state.notesTypeFilter,
+      tagFilter: state.notesTagFilter,
+      query: state.notesQuery,
+      editingNoteId: state.editingNoteId,
+      draftNote: state.draftNote,
+      editingDriveFolder: state.editingDriveFolder,
+      pinnedCards: state.notesPinnedCards,
+      collapsedCards: state.notesCollapsedCards,
+      pinnedOnly: state.notesPinnedOnly,
+      expandedEmbeds: state.notesExpandedEmbeds,
+      embedStartSeconds: state.notesEmbedStartSeconds,
+      expandedTranscripts: state.notesExpandedTranscripts,
+      isFetchingTranscript: state.isFetchingTranscript,
+      transcriptError: state.transcriptError,
+    });
+  }
+
   if (state.view === 'reference') {
     return renderReferenceView({
       activeTab: state.referenceTab,
@@ -494,6 +551,7 @@ const PRESERVED_SEARCH_IDS = new Set([
   'mealprep-freezer-search',
   'pantry-search-input',
   'matcher-ingredient-search',
+  'notes-search-input',
   'reference-sub-search',
   'reference-chart-search',
   'reference-storage-search',
@@ -539,6 +597,7 @@ function applySnapshotToState(snapshot) {
   state.referenceData = snapshot.referenceData || getDefaultReferenceData();
   state.mealPrepData = snapshot.mealPrepData || getDefaultMealPrepData();
   state.pantryData = snapshot.pantryData || getDefaultPantryData();
+  state.notesData = snapshot.notesData || getDefaultNotesData();
   if (
     state.activeDividerId !== 'all' &&
     !state.dividers.some((d) => d.id === state.activeDividerId)
@@ -590,6 +649,40 @@ async function persistPantryPatch(patch, noticeMsg) {
   pushPantryDataToCloud(saved).catch((err) => {
     console.error('Pantry cloud sync failed:', err);
   });
+}
+
+async function persistNotesPatch(patch, noticeMsg) {
+  const saved = await saveNotesData({
+    ...state.notesData,
+    ...patch,
+  });
+  state.notesData = saved;
+  if (noticeMsg) {
+    setNotice('positive', noticeMsg);
+  }
+  render();
+  pushNotesDataToCloud(saved).catch((err) => {
+    console.error('Notes cloud sync failed:', err);
+  });
+}
+
+function readNoteEditorFormIntoDraft() {
+  const form = document.getElementById('notes-item-form');
+  if (!form) return null;
+  const fd = new FormData(form);
+  return {
+    id: String(form.dataset.noteId || '').trim(),
+    type: String(fd.get('type') || 'note'),
+    title: String(fd.get('title') || ''),
+    url: String(fd.get('url') || '').trim(),
+    tags: parseTagsInput(fd.get('tags')),
+    recipeIds: String(fd.get('recipeIds') || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    body: String(fd.get('body') || ''),
+    transcript: String(fd.get('transcript') || ''),
+  };
 }
 
 function resetCookSession(releaseLock = true) {
@@ -1549,6 +1642,299 @@ async function handleAction(action, target) {
     return;
   }
 
+  if (action === 'edit-notes-drive-folder') {
+    state.editingDriveFolder = true;
+    render();
+    return;
+  }
+
+  if (action === 'cancel-notes-drive-folder') {
+    state.editingDriveFolder = false;
+    render();
+    return;
+  }
+
+  if (action === 'select-note-type') {
+    state.notesTypeFilter = target.dataset.type || 'all';
+    render();
+    return;
+  }
+
+  if (action === 'filter-note-tag') {
+    const tag = String(target.dataset.tag || '').trim();
+    state.notesTagFilter = state.notesTagFilter === tag ? '' : tag;
+    render();
+    return;
+  }
+
+  if (action === 'toggle-notes-pinned-only') {
+    state.notesPinnedOnly = !state.notesPinnedOnly;
+    render();
+    return;
+  }
+
+  if (action === 'toggle-pin-note-card') {
+    const cardId = target.dataset.cardId || '';
+    if (!cardId) return;
+    if (state.notesPinnedCards.has(cardId)) {
+      state.notesPinnedCards.delete(cardId);
+    } else {
+      state.notesPinnedCards.add(cardId);
+    }
+    saveIdSet(PREF_KEYS.notesPinnedCards, state.notesPinnedCards);
+    render();
+    return;
+  }
+
+  if (action === 'toggle-collapse-note-card') {
+    const cardId = target.dataset.cardId || '';
+    if (!cardId) return;
+    if (state.notesCollapsedCards.has(cardId)) {
+      state.notesCollapsedCards.delete(cardId);
+    } else {
+      state.notesCollapsedCards.add(cardId);
+    }
+    saveIdSet(PREF_KEYS.notesCollapsedCards, state.notesCollapsedCards);
+    render();
+    return;
+  }
+
+  if (action === 'toggle-collapse-all-notes') {
+    const ids = String(target.dataset.cardIds || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (ids.length === 0) return;
+    const allCollapsed = ids.every((id) => state.notesCollapsedCards.has(id));
+    for (const id of ids) {
+      if (allCollapsed) {
+        state.notesCollapsedCards.delete(id);
+      } else {
+        state.notesCollapsedCards.add(id);
+      }
+    }
+    saveIdSet(PREF_KEYS.notesCollapsedCards, state.notesCollapsedCards);
+    render();
+    return;
+  }
+
+  if (action === 'new-note') {
+    const noteType = target.dataset.noteType || 'note';
+    state.editingNoteId = '__new__';
+    state.draftNote = {
+      id: '',
+      type: noteType,
+      title: '',
+      url: '',
+      body: '',
+      transcript: '',
+      tags: [],
+      recipeIds: [],
+    };
+    state.transcriptError = '';
+    render();
+    return;
+  }
+
+  if (action === 'edit-note') {
+    const noteId = target.dataset.noteId || '';
+    if (!noteId) return;
+    state.editingNoteId = noteId;
+    state.draftNote = null;
+    state.transcriptError = '';
+    render();
+    return;
+  }
+
+  if (action === 'cancel-note-edit') {
+    state.editingNoteId = null;
+    state.draftNote = null;
+    state.transcriptError = '';
+    render();
+    return;
+  }
+
+  if (action === 'delete-note') {
+    const id = target.dataset.noteId || '';
+    const item = (state.notesData.items || []).find((n) => n.id === id);
+    if (!item || !window.confirm(`Delete "${item.title}" from Notes?`)) return;
+    const nextItems = deleteNoteItem(state.notesData.items || [], id);
+    if (state.editingNoteId === id) {
+      state.editingNoteId = null;
+      state.draftNote = null;
+    }
+    await persistNotesPatch({ items: nextItems }, `Deleted "${item.title}".`);
+    return;
+  }
+
+  if (action === 'note-link-recipe') {
+    const draft = readNoteEditorFormIntoDraft();
+    const select = document.getElementById('note-recipe-linker-select');
+    const recipeId = String(select?.value || '').trim();
+    if (!draft || !recipeId) return;
+    if (!draft.recipeIds.includes(recipeId)) {
+      draft.recipeIds.push(recipeId);
+    }
+    state.draftNote = draft;
+    render();
+    return;
+  }
+
+  if (action === 'note-unlink-recipe') {
+    const draft = readNoteEditorFormIntoDraft();
+    const recipeId = String(target.dataset.recipeId || '').trim();
+    if (!draft || !recipeId) return;
+    draft.recipeIds = draft.recipeIds.filter((id) => id !== recipeId);
+    state.draftNote = draft;
+    render();
+    return;
+  }
+
+  if (action === 'fetch-note-transcript') {
+    const draft = readNoteEditorFormIntoDraft();
+    if (!draft) return;
+    state.draftNote = draft;
+    state.isFetchingTranscript = true;
+    state.transcriptError = '';
+    render();
+
+    try {
+      const result = await fetchYouTubeTranscript(draft.url);
+      const cleanTranscript = stripTranscriptTimestamps(result.transcript);
+      state.draftNote = {
+        ...state.draftNote,
+        title: state.draftNote.title.trim() || result.title || state.draftNote.title,
+        transcript: cleanTranscript,
+      };
+      setNotice('positive', 'Fetched clean YouTube transcript (timestamps removed).');
+    } catch (err) {
+      state.transcriptError = err?.message || 'Could not fetch video transcript.';
+    } finally {
+      state.isFetchingTranscript = false;
+      render();
+    }
+    return;
+  }
+
+  if (action === 'clean-note-transcript') {
+    const draft = readNoteEditorFormIntoDraft();
+    if (!draft) return;
+    const cleaned = stripTranscriptTimestamps(draft.transcript);
+    state.draftNote = { ...draft, transcript: cleaned };
+    state.transcriptError = '';
+    setNotice('positive', 'Cleaned transcript timestamps.');
+    render();
+    return;
+  }
+
+  if (action === 'toggle-note-embed') {
+    const id = target.dataset.noteId || '';
+    if (!id) return;
+    if (state.notesExpandedEmbeds.has(id)) {
+      state.notesExpandedEmbeds.delete(id);
+      state.notesEmbedStartSeconds.delete(id);
+    } else {
+      state.notesExpandedEmbeds.add(id);
+    }
+    render();
+    return;
+  }
+
+  if (action === 'jump-video-timestamp') {
+    const id = target.dataset.noteId || '';
+    const seconds = Math.max(0, Number(target.dataset.seconds || 0));
+    const item = (state.notesData.items || []).find((n) => n.id === id && !n.deleted);
+    if (!item) return;
+    const ytId = extractYouTubeId(item.url);
+    if (ytId) {
+      state.notesCollapsedCards.delete(`note-${id}`);
+      saveIdSet(PREF_KEYS.notesCollapsedCards, state.notesCollapsedCards);
+      state.notesExpandedEmbeds.add(id);
+      state.notesEmbedStartSeconds.set(id, seconds);
+      render();
+    } else if (item.url) {
+      const watchUrl = getYouTubeWatchUrl(ytId, seconds) || item.url;
+      window.open(watchUrl, '_blank', 'noopener,noreferrer');
+    }
+    return;
+  }
+
+  if (action === 'toggle-note-transcript') {
+    const id = target.dataset.noteId || '';
+    if (!id) return;
+    if (state.notesExpandedTranscripts.has(id)) {
+      state.notesExpandedTranscripts.delete(id);
+    } else {
+      state.notesExpandedTranscripts.add(id);
+    }
+    render();
+    return;
+  }
+
+  if (action === 'copy-note-transcript') {
+    const id = target.dataset.noteId || '';
+    const item = (state.notesData.items || []).find((n) => n.id === id && !n.deleted);
+    if (!item?.transcript) return;
+    if (!navigator.clipboard?.writeText) {
+      setNotice('warning', 'Clipboard copy is not available in this browser — open the transcript to select and copy manually.');
+      render();
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(item.transcript);
+      setNotice('positive', `Copied "${item.title}" transcript to clipboard.`);
+    } catch {
+      setNotice('warning', 'Clipboard access was denied — expand the transcript to copy manually.');
+    }
+    render();
+    return;
+  }
+
+  if (action === 'note-convert-recipe') {
+    const id = target.dataset.noteId || '';
+    const item = (state.notesData.items || []).find((n) => n.id === id && !n.deleted);
+    if (!item?.url) return;
+    const fallbackDividerId =
+      state.activeDividerId !== 'all' ? state.activeDividerId : state.dividers[0]?.id || 'weeknight';
+    state.view = 'import';
+    state.importUrl = item.url;
+    state.isScraping = true;
+    state.scrapeError = '';
+    render();
+    try {
+      const parsed = await fetchAndScrapeRecipeUrl(item.url, {
+        dividers: state.dividers,
+        fallbackDividerId,
+      });
+      state.isScraping = false;
+      state.draftRecipe = parsed;
+      state.editingRecipeId = null;
+      state.view = 'editor';
+      setNotice('positive', `Imported "${parsed.title}" from saved website — review and save.`);
+    } catch (err) {
+      state.isScraping = false;
+      state.scrapeError = err?.message || 'Failed to scrape recipe webpage.';
+    }
+    render();
+    return;
+  }
+
+  if (action === 'open-note-in-tab') {
+    const id = target.dataset.noteId || '';
+    resetCookSession(true);
+    state.view = 'notes';
+    state.notesTypeFilter = 'all';
+    state.notesTagFilter = '';
+    state.notesQuery = '';
+    state.notesPinnedOnly = false;
+    if (id) {
+      state.notesCollapsedCards.delete(`note-${id}`);
+      saveIdSet(PREF_KEYS.notesCollapsedCards, state.notesCollapsedCards);
+    }
+    render();
+    return;
+  }
+
   if (action === 'add-editor-method') {
     const draft = readEditorFormIntoDraft();
     if (!draft) return;
@@ -1769,6 +2155,7 @@ async function handleAction(action, target) {
       referenceData: snapshot.referenceData,
       mealPrepData: snapshot.mealPrepData,
       pantryData: snapshot.pantryData,
+      notesData: snapshot.notesData,
     });
     setNotice('positive', 'Exported JSON backup.');
     render();
@@ -2007,6 +2394,11 @@ document.addEventListener('input', (event) => {
     render();
     return;
   }
+  if (target.id === 'notes-search-input') {
+    state.notesQuery = target.value;
+    render();
+    return;
+  }
   if (target.id === 'matcher-ingredient-search') {
     state.matcherSearch = target.value;
     render();
@@ -2216,6 +2608,16 @@ document.addEventListener('change', async (event) => {
   if (target.id === 'pantry-category-select') {
     state.pantryCategory = target.value || 'all';
     render();
+    return;
+  }
+
+  if (target.id === 'note-type-select') {
+    const draft = readNoteEditorFormIntoDraft();
+    if (draft) {
+      state.draftNote = { ...draft, type: target.value || 'note' };
+      state.transcriptError = '';
+      render();
+    }
     return;
   }
 
@@ -2576,6 +2978,85 @@ document.addEventListener('submit', async (event) => {
     }
     state.matcherSelectedNames = next;
     render();
+    return;
+  }
+
+  if (formId === 'notes-drive-folder-form') {
+    event.preventDefault();
+    const fd = new FormData(form);
+    const rawUrl = String(fd.get('googleDriveFolderUrl') || '').trim();
+    const safeUrl = rawUrl ? normalizeSafeUrl(rawUrl) : '';
+    if (rawUrl && !safeUrl) {
+      setNotice('warning', 'Please enter a valid http:// or https:// Google Drive URL.');
+      render();
+      return;
+    }
+    state.editingDriveFolder = false;
+    await persistNotesPatch(
+      {
+        googleDriveFolderUrl: safeUrl,
+        googleDriveUpdatedMs: Date.now(),
+      },
+      safeUrl ? 'Saved Google Drive storage folder link.' : 'Cleared Google Drive folder link.'
+    );
+    return;
+  }
+
+  if (formId === 'notes-item-form') {
+    event.preventDefault();
+    try {
+      const fd = new FormData(form);
+      const existingId = String(form.dataset.noteId || '').trim();
+      const title = String(fd.get('title') || '').trim();
+      if (!title) {
+        state.draftNote = readNoteEditorFormIntoDraft();
+        setNotice('warning', 'Please enter a title before saving.');
+        render();
+        return;
+      }
+
+      const rawUrl = String(fd.get('url') || '').trim();
+      const safeUrl = rawUrl ? normalizeSafeUrl(rawUrl) : '';
+      if (rawUrl && !safeUrl) {
+        state.draftNote = readNoteEditorFormIntoDraft();
+        setNotice('warning', 'Please enter a valid http:// or https:// URL.');
+        render();
+        return;
+      }
+
+      const noteType = String(fd.get('type') || 'note');
+      const rawTranscript = String(fd.get('transcript') || '').trim();
+      const cleanTranscript =
+        noteType === 'video' && rawTranscript ? stripTranscriptTimestamps(rawTranscript) : rawTranscript;
+
+      const candidate = normalizeNoteItem({
+        id: existingId || generateId('note'),
+        type: noteType,
+        title,
+        url: safeUrl,
+        body: fd.get('body'),
+        transcript: cleanTranscript,
+        tags: fd.get('tags'),
+        recipeIds: fd.get('recipeIds'),
+      });
+
+      const nextItems = upsertNoteItem(state.notesData.items || [], candidate);
+      if (!existingId) {
+        if (state.notesTypeFilter !== 'all' && state.notesTypeFilter !== candidate.type) {
+          state.notesTypeFilter = 'all';
+        }
+        state.notesTagFilter = '';
+        state.notesQuery = '';
+      }
+      state.editingNoteId = null;
+      state.draftNote = null;
+      state.transcriptError = '';
+      await persistNotesPatch({ items: nextItems }, `Saved "${candidate.title}" to Notes.`);
+    } catch (err) {
+      console.error('Notes form save failed:', err);
+      setNotice('danger', err?.message || 'Could not save note.');
+      render();
+    }
     return;
   }
 

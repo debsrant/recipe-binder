@@ -224,6 +224,7 @@ export function renderDetailView({
   activeMethodIndex = 0,
   printMethodsMode = 'selected',
   techniques,
+  linkedNotes = [],
 }) {
   if (!recipe || recipe.deleted) {
     return `
@@ -546,6 +547,50 @@ export function renderDetailView({
                 }
               </p>
             </section>
+
+            ${
+              (linkedNotes || []).length > 0
+                ? `<section class="panel-card linked-notes-card no-print">
+                    <h2>Linked Notes, Videos &amp; Files</h2>
+                    <ul class="linked-notes-list">
+                      ${linkedNotes
+                        .map((note) => {
+                          const typeLabel =
+                            note.type === 'video'
+                              ? 'Video'
+                              : note.type === 'website'
+                              ? 'Website'
+                              : note.type === 'file'
+                              ? 'File / PDF'
+                              : 'Note';
+                          const safeUrl = /^https?:\/\//i.test(note.url || '') ? note.url : '';
+                          return `<li class="linked-note-row">
+                            <div class="linked-note-info">
+                              <span class="badge badge-divider">${escapeHtml(typeLabel)}</span>
+                              <strong>${escapeHtml(note.title)}</strong>
+                            </div>
+                            <div class="linked-note-actions">
+                              ${
+                                safeUrl
+                                  ? `<a class="btn btn-sm btn-outline" href="${escapeHtml(
+                                      safeUrl
+                                    )}" target="_blank" rel="noopener noreferrer">Open ↗</a>`
+                                  : ''
+                              }
+                              <button
+                                type="button"
+                                class="btn btn-sm btn-outline"
+                                data-action="open-note-in-tab"
+                                data-note-id="${escapeHtml(note.id)}"
+                              >View in Notes</button>
+                            </div>
+                          </li>`;
+                        })
+                        .join('')}
+                    </ul>
+                  </section>`
+                : ''
+            }
           </div>
 
           <div class="spread-right">
