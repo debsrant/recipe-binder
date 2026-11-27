@@ -49,6 +49,7 @@ import {
   deleteReferenceItem,
   getDefaultReferenceData,
   normalizeFlavor,
+  normalizeStorageTime,
   normalizeSubstitution,
   normalizeTechnique,
   upsertReferenceItem,
@@ -203,13 +204,12 @@ const state = {
   refSubQuery: '',
   editingSubId: null,
   refChartQuery: '',
-  refStorageCategory: 'all',
   refStorageQuery: '',
+  editingStorageId: null,
   refTechniqueCategory: 'all',
   refTechniqueQuery: '',
   editingTechniqueId: null,
-  refFlavorFamily: 'all',
-  refHerbFoodFilter: 'all',
+  refHerbCuisine: 'all',
   refFlavorQuery: '',
   editingFlavorId: null,
   checkedIngredients: new Set(),
@@ -447,13 +447,12 @@ function renderMainContent() {
       subQuery: state.refSubQuery,
       editingSubId: state.editingSubId,
       chartQuery: state.refChartQuery,
-      storageCategory: state.refStorageCategory,
       storageQuery: state.refStorageQuery,
+      editingStorageId: state.editingStorageId,
       techniqueCategory: state.refTechniqueCategory,
       techniqueQuery: state.refTechniqueQuery,
       editingTechniqueId: state.editingTechniqueId,
-      flavorFamily: state.refFlavorFamily,
-      herbFoodFilter: state.refHerbFoodFilter,
+      herbCuisine: state.refHerbCuisine,
       flavorQuery: state.refFlavorQuery,
       editingFlavorId: state.editingFlavorId,
       pinnedCards: state.refPinnedCards,
@@ -928,21 +927,25 @@ async function handleAction(action, target) {
     return;
   }
 
-  if (action === 'select-flavor-family') {
-    state.refFlavorFamily = target.dataset.familyId || 'all';
+  if (action === 'select-herb-cuisine') {
+    state.refHerbCuisine = target.dataset.cuisine || 'all';
     render();
     return;
   }
 
-  if (action === 'select-herb-food-filter') {
-    state.refHerbFoodFilter = target.dataset.foodFilter || 'all';
-    render();
-    return;
-  }
-
-  if (action === 'select-storage-category') {
-    state.refStorageCategory = target.dataset.category || 'all';
-    render();
+  if (action === 'quick-add-companion-herb') {
+    const herbName = String(target.dataset.herbName || '').trim();
+    const input = document.getElementById('flavor-pairs-input');
+    if (!herbName || !input) return;
+    const existing = input.value
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!existing.some((item) => item.toLowerCase() === herbName.toLowerCase())) {
+      existing.push(herbName);
+      input.value = existing.join(', ');
+    }
+    input.focus();
     return;
   }
 
@@ -999,15 +1002,20 @@ async function handleAction(action, target) {
 
   if (action === 'select-flavor') {
     const flavorId = target.dataset.flavorId || '';
-    const targetHerb = (state.referenceData.flavors || []).find((f) => f.id === flavorId);
+    const flavorName = String(target.dataset.flavorName || '').trim();
+    const list = state.referenceData.flavors || [];
+    const targetHerb =
+      list.find((f) => f.id === flavorId) ||
+      list.find((f) => f.name.toLowerCase() === flavorName.toLowerCase());
+    state.refHerbCuisine = 'all';
     if (targetHerb) {
-      state.refFlavorFamily = 'all';
-      state.refHerbFoodFilter = 'all';
       state.refFlavorQuery = targetHerb.name;
       state.refCollapsedCards.delete(`herb-${targetHerb.id}`);
       saveIdSet(PREF_KEYS.refCollapsedCards, state.refCollapsedCards);
-      render();
+    } else if (flavorName) {
+      state.refFlavorQuery = flavorName;
     }
+    render();
     return;
   }
 
@@ -1019,9 +1027,33 @@ async function handleAction(action, target) {
 
   if (action === 'cancel-ref-edit') {
     state.editingSubId = null;
+    state.editingStorageId = null;
     state.editingTechniqueId = null;
     state.editingFlavorId = null;
     render();
+    return;
+  }
+
+  if (action === 'new-storage-item') {
+    state.editingStorageId = '__new__';
+    render();
+    return;
+  }
+
+  if (action === 'edit-storage-item') {
+    state.editingStorageId = target.dataset.storageId || null;
+    render();
+    return;
+  }
+
+  if (action === 'delete-storage-item') {
+    const id = target.dataset.storageId || '';
+    const item = (state.referenceData.storageTimes || []).find((s) => s.id === id);
+    if (!item) return;
+    if (!window.confirm(`Delete "${item.food}" from Food Storage Times?`)) return;
+    const nextStorage = deleteReferenceItem(state.referenceData.storageTimes || [], id);
+    if (state.editingStorageId === id) state.editingStorageId = null;
+    await persistReferencePatch({ storageTimes: nextStorage }, `Deleted "${item.food}" from Food Storage Times.`);
     return;
   }
 
@@ -1103,6 +1135,12 @@ async function handleAction(action, target) {
       await persistReferencePatch({ substitutions: defaults.substitutions }, 'Restored default substitutions.');
       return;
     }
+    if (section === 'storageTimes') {
+      if (!window.confirm('Restore all default Food Storage Times?')) return;
+      state.editingStorageId = null;
+      await persistReferencePatch({ storageTimes: defaults.storageTimes }, 'Restored default Food Storage Times.');
+      return;
+    }
     if (section === 'techniques') {
       if (!window.confirm('Restore all default cooking technique cards?')) return;
       state.editingTechniqueId = null;
@@ -1112,8 +1150,7 @@ async function handleAction(action, target) {
     if (section === 'flavors') {
       if (!window.confirm('Restore all default Herb & Spice Profiles?')) return;
       state.editingFlavorId = null;
-      state.refFlavorFamily = 'all';
-      state.refHerbFoodFilter = 'all';
+      state.refHerbCuisine = 'all';
       state.refFlavorQuery = '';
       await persistReferencePatch({ flavors: defaults.flavors }, 'Restored default Herb & Spice Profiles.');
       return;
@@ -1945,9 +1982,7 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key === 'Enter' || event.key === ' ') {
-    const actionEl = event.target.closest?.(
-      '[data-action="select-flavor-family"], [data-action="toggle-timeline-step"]'
-    );
+    const actionEl = event.target.closest?.('[data-action="toggle-timeline-step"]');
     if (actionEl) {
       event.preventDefault();
       handleAction(actionEl.dataset.action, actionEl);
@@ -2332,15 +2367,47 @@ document.addEventListener('submit', async (event) => {
     return;
   }
 
+  if (formId === 'ref-storage-form') {
+    event.preventDefault();
+    const fd = new FormData(form);
+    const existingId = form.dataset.storageId || '';
+    const list = state.referenceData.storageTimes || [];
+    const candidate = normalizeStorageTime({
+      id: existingId || undefined,
+      food: fd.get('food'),
+      categoryId: fd.get('categoryId'),
+      fridge: fd.get('fridge'),
+      freezer: fd.get('freezer'),
+      pantry: fd.get('pantry'),
+      notes: fd.get('notes'),
+    });
+    if (!existingId && list.some((s) => s.id === candidate.id)) {
+      candidate.id = generateId('st');
+    }
+    const nextStorage = upsertReferenceItem(list, candidate);
+    state.editingStorageId = null;
+    await persistReferencePatch(
+      { storageTimes: nextStorage },
+      `Saved "${candidate.food}" to Food Storage Times.`
+    );
+    return;
+  }
+
   if (formId === 'ref-flavor-form') {
     event.preventDefault();
     const fd = new FormData(form);
     const existingId = form.dataset.flavorId || '';
     const list = state.referenceData.flavors || [];
+    const nameToId = new Map(list.map((f) => [f.name.toLowerCase(), f.id]));
+    const rawPairs = String(fd.get('pairsWellWith') || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((token) => nameToId.get(token.toLowerCase()) || token);
     const candidate = normalizeFlavor({
       id: existingId || undefined,
       name: fd.get('name'),
-      familyId: fd.get('familyId'),
+      familyId: form.dataset.familyId || undefined,
       profile: fd.get('profile'),
       cuisineVibe: fd.get('cuisineVibe'),
       foodPairings: {
@@ -2350,7 +2417,7 @@ document.addEventListener('submit', async (event) => {
         appetizersBaking: fd.get('foodAppetizersBaking'),
       },
       bestWith: fd.get('bestWith'),
-      pairsWellWith: fd.getAll('pairsWellWith'),
+      pairsWellWith: rawPairs,
       substitutes: fd.get('substitutes'),
     });
     if (!existingId && list.some((f) => f.id === candidate.id)) {
