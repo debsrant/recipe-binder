@@ -76,6 +76,8 @@ const RECIPE_RESPONSE_SCHEMA = {
       },
     },
     notes: { type: 'string' },
+    storageNotes: { type: 'string' },
+    reheatNotes: { type: 'string' },
   },
   required: ['title', 'ingredients', 'methods'],
 };
@@ -227,7 +229,13 @@ function resolveDividerId(dividerHint, dividers = [], fallbackDividerId = 'weekn
  */
 export function aiJsonToRecipeDraft(
   aiObj,
-  { sourceUrl = '', sourceTitle = '', dividers = [], fallbackDividerId = 'weeknight' } = {}
+  {
+    sourceUrl = '',
+    sourceTitle = '',
+    sourceTranscript = '',
+    dividers = [],
+    fallbackDividerId = 'weeknight',
+  } = {}
 ) {
   const src = aiObj && typeof aiObj === 'object' ? aiObj : {};
   const dividerId = resolveDividerId(src.dividerHint, dividers, fallbackDividerId);
@@ -276,6 +284,9 @@ export function aiJsonToRecipeDraft(
       steps: safeMethods[0].steps,
       methods: safeMethods,
       notes: String(src.notes || '').trim(),
+      storageNotes: String(src.storageNotes || '').trim(),
+      reheatNotes: String(src.reheatNotes || '').trim(),
+      sourceTranscript: String(sourceTranscript || src.sourceTranscript || '').trim(),
     },
     dividerId
   );
@@ -526,6 +537,7 @@ export async function extractRecipeWithAi({
   sourceLabel = 'recipe text',
   sourceUrl = '',
   sourceTitle = '',
+  sourceTranscript = '',
   dividers = [],
   fallbackDividerId = 'weeknight',
   config,
@@ -557,7 +569,9 @@ export async function extractRecipeWithAi({
     '  "tags": ["weeknight", "quick"],',
     '  "ingredients": ["1 lb chicken thighs", "2 tbsp olive oil"],',
     '  "methods": [{ "name": "Skillet or Oven (leave empty if single standard method)", "cookMinutes": 25, "note": "", "steps": ["Step 1...", "Step 2..."] }],',
-    '  "notes": "Helpful chef tips, make-ahead notes, or variations"',
+    '  "notes": "Helpful chef tips, make-ahead notes, or variations",',
+    '  "storageNotes": "Fridge & freezer storage instructions (shelf life, freezing suitability, container tips)",',
+    '  "reheatNotes": "Microwave & oven/air-fryer reheating instructions"',
     '}',
     '',
     'SOURCE TEXT:',
@@ -577,6 +591,7 @@ export async function extractRecipeWithAi({
   return aiJsonToRecipeDraft(parsed, {
     sourceUrl,
     sourceTitle,
+    sourceTranscript,
     dividers,
     fallbackDividerId,
   });
@@ -802,4 +817,232 @@ export async function askAboutRecipeWithAi({
     responseSchema: null,
     config,
   });
+}
+
+/**
+ * Merges AI-suggested fields into a recipe draft, populating only blank or default/zero fields.
+ */
+export function mergeAiAutofillIntoDraft(draft, aiPatch) {
+  const base = draft && typeof draft === 'object' ? draft : {};
+  const patch = aiPatch && typeof aiPatch === 'object' ? aiPatch : {};
+
+  const currentTitle = String(base.title || '').trim();
+  const title =
+    !currentTitle || currentTitle === 'Untitled Recipe'
+      ? String(patch.title || currentTitle || 'Untitled Recipe').trim()
+      : currentTitle;
+
+  const summary = String(base.summary || '').trim() || String(patch.summary || '').trim();
+  const currentPrep = Number(base.prepMinutes);
+  const patchPrep = Number(patch.prepMinutes);
+  const prepMinutes =
+    Number.isFinite(currentPrep) && currentPrep > 0
+      ? Math.round(currentPrep)
+      : Number.isFinite(patchPrep) && patchPrep > 0
+      ? Math.round(patchPrep)
+      : 0;
+
+  const currentServings = Number(base.servings);
+  const patchServings = Number(patch.servings);
+  const servings =
+    Number.isFinite(currentServings) && currentServings > 0
+      ? currentServings
+      : Number.isFinite(patchServings) && patchServings > 0
+      ? patchServings
+      : 4;
+
+  const servingSize =
+    String(base.servingSize || '').trim() || String(patch.servingSize || '').trim();
+
+  const existingTags = Array.isArray(base.tags) ? base.tags.filter(Boolean) : [];
+  const tags =
+    existingTags.length > 0
+      ? existingTags
+      : parseTagsInput(Array.isArray(patch.tags) ? patch.tags.join(',') : patch.tags || '');
+
+  const storageNotes =
+    String(base.storageNotes || '').trim() || String(patch.storageNotes || '').trim();
+  const reheatNotes =
+    String(base.reheatNotes || '').trim() || String(patch.reheatNotes || '').trim();
+
+  return {
+    ...base,
+    title,
+    summary,
+    prepMinutes,
+    servings,
+    servingSize,
+    tags,
+    storageNotes,
+    reheatNotes,
+  };
+}
+
+/**
+ * Generates missing metadata (title, summary, yield, prep time, tags, storage & reheat) from a draft recipe.
+ */
+export async function autofillMissingRecipeFieldsWithAi({ recipe, config }) {
+  const contextText = buildRecipePromptContext({ recipe });
+  if (!contextText.trim()) {
+    throw new Error('Add some ingredients or steps first so AI has context to fill.');
+  }
+
+  const schema = {
+    type: 'object',
+    properties: {
+      title: { type: 'string' },
+      summary: { type: 'string' },
+      prepMinutes: { type: 'number' },
+      servings: { type: 'number' },
+      servingSize: { type: 'string' },
+      tags: { type: 'array', items: { type: 'string' } },
+      storageNotes: { type: 'string' },
+      reheatNotes: { type: 'string' },
+    },
+  };
+
+  const systemInstruction =
+    'You are a practical recipe editor. Suggest realistic, concise missing details for this recipe (title, 1-sentence summary, prep time, base servings, per-portion servingSize, up to 5 kebab-case tags, fridge/freezer storageNotes, and microwave/reheatNotes). Return ONLY JSON.';
+
+  const userPrompt = [
+    'Generate helpful recipe metadata matching:',
+    '{ "title": "...", "summary": "...", "prepMinutes": 15, "servings": 4, "servingSize": "1 bowl", "tags": ["weeknight"], "storageNotes": "Fridge 3-4 days airtight; freezes well up to 3 months.", "reheatNotes": "Microwave covered 90 sec, stir, then 30-60 sec until hot." }',
+    '',
+    contextText,
+  ].join('\n');
+
+  const rawText = await callAiCompletion({
+    systemInstruction,
+    userPrompt,
+    responseSchema: schema,
+    config,
+  });
+  return extractJsonObjectFromText(rawText);
+}
+
+/**
+ * Generates tailored fridge/freezer storage and microwave/reheat instructions for a recipe.
+ */
+export async function generateStorageReheatWithAi({ recipe, config }) {
+  const contextText = buildRecipePromptContext({ recipe });
+  const schema = {
+    type: 'object',
+    properties: {
+      storageNotes: { type: 'string' },
+      reheatNotes: { type: 'string' },
+    },
+    required: ['storageNotes', 'reheatNotes'],
+  };
+
+  const systemInstruction =
+    'You are a food safety and meal-prep assistant. Provide concise, practical fridge/freezer storage guidelines (noting dairy/herb/texture caveats) and microwave + oven/air-fryer reheating instructions tailored to this dish. Return ONLY JSON.';
+
+  const userPrompt = [
+    'Return JSON: { "storageNotes": "...", "reheatNotes": "..." }',
+    '',
+    contextText,
+  ].join('\n');
+
+  const rawText = await callAiCompletion({
+    systemInstruction,
+    userPrompt,
+    responseSchema: schema,
+    config,
+  });
+  const parsed = extractJsonObjectFromText(rawText);
+  return {
+    storageNotes: String(parsed?.storageNotes || '').trim(),
+    reheatNotes: String(parsed?.reheatNotes || '').trim(),
+  };
+}
+
+/**
+ * Suggests a clear title and 1-sentence summary for a recipe draft.
+ */
+export async function suggestRecipeTitleWithAi({ recipe, config }) {
+  const contextText = buildRecipePromptContext({ recipe });
+  const schema = {
+    type: 'object',
+    properties: {
+      title: { type: 'string' },
+      summary: { type: 'string' },
+    },
+    required: ['title'],
+  };
+
+  const rawText = await callAiCompletion({
+    systemInstruction:
+      'You are a recipe editor. Suggest an appealing, accurate recipe title and concise 1-sentence summary. Return ONLY JSON: { "title": "...", "summary": "..." }.',
+    userPrompt: contextText,
+    responseSchema: schema,
+    config,
+  });
+  const parsed = extractJsonObjectFromText(rawText);
+  return {
+    title: String(parsed?.title || '').trim(),
+    summary: String(parsed?.summary || '').trim(),
+  };
+}
+
+/**
+ * Estimates realistic servings count and per-portion serving yield size from recipe ingredients/steps.
+ */
+export async function estimateRecipeYieldWithAi({ recipe, config }) {
+  const contextText = buildRecipePromptContext({ recipe });
+  const schema = {
+    type: 'object',
+    properties: {
+      servings: { type: 'number' },
+      servingSize: { type: 'string' },
+    },
+    required: ['servings', 'servingSize'],
+  };
+
+  const rawText = await callAiCompletion({
+    systemInstruction:
+      'You are a culinary math assistant. Estimate realistic number of servings and a practical per-portion servingSize label (e.g., "1 cup", "2 thighs + pan sauce", "1 slice") from the ingredient quantities. Return ONLY JSON: { "servings": 4, "servingSize": "..." }.',
+    userPrompt: contextText,
+    responseSchema: schema,
+    config,
+  });
+  const parsed = extractJsonObjectFromText(rawText);
+  const servings = Number(parsed?.servings);
+  return {
+    servings: Number.isFinite(servings) && servings > 0 ? servings : 4,
+    servingSize: String(parsed?.servingSize || '').trim(),
+  };
+}
+
+/**
+ * Cleans up an entire draft recipe (standardizing ingredient measurements & steps) while preserving user-only fields.
+ */
+export async function cleanupRecipeDraftWithAi({
+  recipe,
+  dividers = [],
+  fallbackDividerId = 'weeknight',
+  config,
+}) {
+  const contextText = buildRecipePromptContext({ recipe });
+  const cleaned = await extractRecipeWithAi({
+    text: contextText,
+    sourceLabel: 'messy recipe draft',
+    sourceUrl: recipe?.source || '',
+    sourceTitle: recipe?.title || '',
+    sourceTranscript: recipe?.sourceTranscript || '',
+    dividers,
+    fallbackDividerId,
+    config,
+  });
+
+  return {
+    ...cleaned,
+    id: recipe?.id || cleaned.id,
+    dividerId: recipe?.dividerId || cleaned.dividerId,
+    imageUrl: recipe?.imageUrl || '',
+    notes: recipe?.notes || cleaned.notes,
+    storageNotes: recipe?.storageNotes || cleaned.storageNotes,
+    reheatNotes: recipe?.reheatNotes || cleaned.reheatNotes,
+    favorite: Boolean(recipe?.favorite),
+    createdAt: recipe?.createdAt || '',
+  };
 }

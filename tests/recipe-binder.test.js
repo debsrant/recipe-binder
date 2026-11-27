@@ -36,6 +36,7 @@ import {
   buildRecipePromptContext,
   extractGeminiInteractionText,
   extractJsonObjectFromText,
+  mergeAiAutofillIntoDraft,
   normalizeAiConfig,
 } from '../src/lib/ai.js';
 import { createZipBytes } from '../src/lib/zip.js';
@@ -1497,4 +1498,60 @@ test('Step 3 Cook Mode AI helpers build context, normalize generated methods, an
   assert.equal(appended.recipe.methods.length, 2);
   assert.equal(appended.recipe.methods[0].name, 'Original');
   assert.equal(appended.recipe.methods[1].name, 'Air Fryer');
+});
+
+test('Recipe image, storageNotes, reheatNotes, collection pinning/alphabetical sort, and AI autofill merge work properly', () => {
+  const recA = normalizeRecipe({
+    id: 'r-z',
+    title: 'Zucchini Fritters',
+    imageUrl: 'https://example.com/zucchini.jpg',
+    storageNotes: 'Refrigerate up to 3 days.',
+    reheatNotes: 'Air fry 3 min at 375 F.',
+    notes: 'Squeeze zucchini dry.',
+  });
+  const md = recipeToMarkdown(recA, { dividerName: 'Sides' });
+  assert.ok(md.includes('imageUrl: "https://example.com/zucchini.jpg"'));
+  assert.ok(md.includes('## Storage & Freezer'));
+  assert.ok(md.includes('## Reheating'));
+  const roundTrip = parseMarkdownRecipe(md, { dividers: TEST_DIVIDERS });
+  assert.equal(roundTrip.imageUrl, 'https://example.com/zucchini.jpg');
+  assert.equal(roundTrip.storageNotes, 'Refrigerate up to 3 days.');
+  assert.equal(roundTrip.reheatNotes, 'Air fry 3 min at 375 F.');
+
+  const htmlWithImg = `
+    <html><head><script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Recipe","name":"Chili","image":["https://cdn.example.com/chili.jpg"],"recipeIngredient":["1 lb beef"],"recipeInstructions":["Simmer."]}
+    </script></head><body></body></html>
+  `;
+  const importedImg = parseHtmlRecipe(htmlWithImg, { dividers: TEST_DIVIDERS });
+  assert.equal(importedImg.imageUrl, 'https://cdn.example.com/chili.jpg');
+
+  const recB = normalizeRecipe({ id: 'r-a', title: 'Apple Crisp', favorite: false });
+  const recC = normalizeRecipe({ id: 'r-m', title: 'Marinara', favorite: true });
+  const pinnedFirst = filterAndSortRecipes([recA, recB, recC], {
+    sortBy: 'title',
+    pinnedSet: new Set(['r-z']),
+  });
+  assert.deepEqual(
+    pinnedFirst.map((r) => r.id),
+    ['r-z', 'r-a', 'r-m']
+  );
+
+  const mergedDraft = mergeAiAutofillIntoDraft(
+    { title: 'My Custom Chili', prepMinutes: 0, servings: 4, storageNotes: '' },
+    {
+      title: 'Ignored Suggested Title',
+      summary: 'Hearty beef chili.',
+      prepMinutes: 15,
+      servingSize: '1 1/2 cups',
+      storageNotes: 'Freeze up to 3 months.',
+      reheatNotes: 'Microwave 2 min covered.',
+    }
+  );
+  assert.equal(mergedDraft.title, 'My Custom Chili');
+  assert.equal(mergedDraft.prepMinutes, 15);
+  assert.equal(mergedDraft.summary, 'Hearty beef chili.');
+  assert.equal(mergedDraft.servingSize, '1 1/2 cups');
+  assert.equal(mergedDraft.storageNotes, 'Freeze up to 3 months.');
+  assert.equal(mergedDraft.reheatNotes, 'Microwave 2 min covered.');
 });

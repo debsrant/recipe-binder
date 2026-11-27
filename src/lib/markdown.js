@@ -118,6 +118,9 @@ export function recipeToMarkdown(recipe, { dividerName = '', scaleFactor = 1 } =
   if (dividerName) fmLines.push(`divider: ${yamlQuote(dividerName)}`);
   if (recipe?.dividerId) fmLines.push(`dividerId: ${yamlQuote(recipe.dividerId)}`);
   if (recipe?.source) fmLines.push(`source: ${yamlQuote(recipe.source)}`);
+  if (recipe?.imageUrl && /^https?:\/\//i.test(recipe.imageUrl)) {
+    fmLines.push(`imageUrl: ${yamlQuote(recipe.imageUrl)}`);
+  }
   if (recipe?.summary) fmLines.push(`summary: ${yamlQuote(recipe.summary)}`);
   fmLines.push(`prepMinutes: ${Math.max(0, Math.round(prep))}`);
   fmLines.push(`cookMinutes: ${Math.max(0, Math.round(primaryCook))}`);
@@ -189,6 +192,14 @@ export function recipeToMarkdown(recipe, { dividerName = '', scaleFactor = 1 } =
 
   if (recipe?.notes && String(recipe.notes).trim()) {
     body.push('', '## Notes', '', String(recipe.notes).trim());
+  }
+
+  if (recipe?.storageNotes && String(recipe.storageNotes).trim()) {
+    body.push('', '## Storage & Freezer', '', String(recipe.storageNotes).trim());
+  }
+
+  if (recipe?.reheatNotes && String(recipe.reheatNotes).trim()) {
+    body.push('', '## Reheating', '', String(recipe.reheatNotes).trim());
   }
 
   return `${fmLines.join('\n')}\n\n${body.join('\n')}\n`;
@@ -331,6 +342,8 @@ export function parseMarkdownRecipe(
   const parsedMethods = [];
   let currentMethod = null;
   const notesLines = [];
+  const storageLines = [];
+  const reheatLines = [];
 
   function ensureCurrentMethod() {
     if (!currentMethod) {
@@ -371,6 +384,14 @@ export function parseMarkdownRecipe(
           section = 'steps';
           continue;
         }
+        if (/^(storage|freezer|storage\s*&\s*freezer|make ahead)\b/.test(headingText)) {
+          section = 'storage';
+          continue;
+        }
+        if (/^(reheating?|microwave|reheating?\s*&\s*microwave)\b/.test(headingText)) {
+          section = 'reheat';
+          continue;
+        }
         if (/^(notes?|tips?|cook'?s(?:\s+margin)?\s+notes?|margin notes?|variations?)\b/.test(headingText)) {
           section = 'notes';
           continue;
@@ -395,6 +416,10 @@ export function parseMarkdownRecipe(
       }
       if (section === 'notes' && trimmed) {
         notesLines.push(rawHeading);
+      } else if (section === 'storage' && trimmed) {
+        storageLines.push(rawHeading);
+      } else if (section === 'reheat' && trimmed) {
+        reheatLines.push(rawHeading);
       }
       continue;
     }
@@ -402,6 +427,10 @@ export function parseMarkdownRecipe(
     if (!trimmed) {
       if (section === 'notes' && notesLines.length > 0 && notesLines[notesLines.length - 1] !== '') {
         notesLines.push('');
+      } else if (section === 'storage' && storageLines.length > 0 && storageLines[storageLines.length - 1] !== '') {
+        storageLines.push('');
+      } else if (section === 'reheat' && reheatLines.length > 0 && reheatLines[reheatLines.length - 1] !== '') {
+        reheatLines.push('');
       }
       continue;
     }
@@ -477,6 +506,10 @@ export function parseMarkdownRecipe(
 
     if (section === 'notes') {
       notesLines.push(trimmed);
+    } else if (section === 'storage') {
+      storageLines.push(trimmed);
+    } else if (section === 'reheat') {
+      reheatLines.push(trimmed);
     }
   }
 
@@ -543,6 +576,8 @@ export function parseMarkdownRecipe(
   const fmTags = frontmatter.tags ? parseTagsInput(frontmatter.tags) : bodyTags;
   const normalizedTags = fmTags.map((t) => normalizeTag(t)).filter(Boolean);
   const notes = String(frontmatter.notes || notesLines.join('\n')).trim();
+  const storageNotes = String(frontmatter.storageNotes || storageLines.join('\n')).trim();
+  const reheatNotes = String(frontmatter.reheatNotes || reheatLines.join('\n')).trim();
   const title =
     String(frontmatter.title || bodyTitle || titleFromFilename(filename) || 'Imported Recipe').trim();
 
@@ -552,6 +587,7 @@ export function parseMarkdownRecipe(
     dividerId: resolveDividerId(frontmatter, dividers, fallbackDividerId),
     summary: String(frontmatter.summary || frontmatter.description || bodySummary || '').trim(),
     source: String(frontmatter.source || frontmatter.url || frontmatter.author || bodySource || '').trim(),
+    imageUrl: String(frontmatter.imageUrl || frontmatter.image || '').trim(),
     prepMinutes,
     cookMinutes: methods[0].cookMinutes || cookMinutes,
     servings,
@@ -561,6 +597,8 @@ export function parseMarkdownRecipe(
     steps: methods[0].steps,
     methods,
     notes,
+    storageNotes,
+    reheatNotes,
     favorite: Boolean(frontmatter.favorite),
     createdAt: String(frontmatter.createdAt || ''),
     updatedMs: Number(frontmatter.updatedMs || 0) || undefined,

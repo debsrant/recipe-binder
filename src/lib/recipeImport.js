@@ -309,6 +309,41 @@ function flattenInstructions(rawInstructions) {
   return steps;
 }
 
+function extractImageUrl(rawImage, baseUrl = '') {
+  const pickUrl = (val) => {
+    if (!val) return '';
+    if (typeof val === 'string') return decodeHtmlEntities(val).trim();
+    if (Array.isArray(val)) {
+      for (const entry of val) {
+        const found = pickUrl(entry);
+        if (found) return found;
+      }
+      return '';
+    }
+    if (typeof val === 'object') {
+      return pickUrl(val.url || val.contentUrl || val.thumbnailUrl || '');
+    }
+    return '';
+  };
+
+  const candidate = pickUrl(rawImage);
+  if (!candidate) return '';
+  try {
+    const resolved = baseUrl ? new URL(candidate, baseUrl) : new URL(candidate);
+    if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return '';
+    return resolved.toString();
+  } catch {
+    return /^https?:\/\//i.test(candidate) ? candidate : '';
+  }
+}
+
+function extractMetaOgImage(html, baseUrl = '') {
+  const m =
+    html.match(/<meta\b[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["'][^>]*>/i) ||
+    html.match(/<meta\b[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["'][^>]*>/i);
+  return m?.[1] ? extractImageUrl(m[1], baseUrl) : '';
+}
+
 function buildSourceLabel(authorRaw, sourceUrl) {
   const author = extractAuthorName(authorRaw);
   let hostname = '';
@@ -367,6 +402,7 @@ function recipeFromJsonLdNode(node, { sourceUrl = '', dividers = [], fallbackDiv
   const title = stripHtmlTags(node.name || node.headline || '') || 'Imported Recipe';
   const summary = stripHtmlTags(node.description || '').split('\n')[0] || '';
   const source = buildSourceLabel(node.author, sourceUrl);
+  const imageUrl = extractImageUrl(node.image, sourceUrl);
 
   const prepMinutes = parseDurationMinutes(node.prepTime);
   let cookMinutes = parseDurationMinutes(node.cookTime);
@@ -418,6 +454,7 @@ function recipeFromJsonLdNode(node, { sourceUrl = '', dividers = [], fallbackDiv
     dividerId,
     summary,
     source,
+    imageUrl,
     prepMinutes,
     cookMinutes: methods[0].cookMinutes,
     servings,
@@ -506,6 +543,7 @@ function parseMicrodataRecipe(html, { sourceUrl = '', dividers = [], fallbackDiv
     dividerId: guessDividerId([title], dividers, fallbackDividerId),
     summary,
     source: buildSourceLabel('', sourceUrl),
+    imageUrl: extractMetaOgImage(html, sourceUrl),
     prepMinutes: parseDurationMinutes(prepMatch?.[1] || 0),
     cookMinutes: parseDurationMinutes(cookMatch?.[1] || 0),
     servings: parseServingsNumber(stripHtmlTags(yieldMatch?.[1] || '')),
@@ -531,6 +569,7 @@ export function parseHtmlRecipe(
   }
 
   const ldBlocks = parseJsonLdBlocks(rawHtml);
+  const ogImage = extractMetaOgImage(rawHtml, sourceUrl);
   for (const block of ldBlocks) {
     const recipeNode = findRecipeNode(block);
     if (recipeNode) {
@@ -539,6 +578,9 @@ export function parseHtmlRecipe(
         dividers,
         fallbackDividerId,
       });
+      if (!parsed.imageUrl && ogImage) {
+        parsed.imageUrl = ogImage;
+      }
       if (parsed.ingredients.length > 0 || parsed.steps.length > 0) {
         return parsed;
       }
@@ -551,6 +593,9 @@ export function parseHtmlRecipe(
     fallbackDividerId,
   });
   if (micro && (micro.ingredients.length > 0 || micro.steps.length > 0)) {
+    if (!micro.imageUrl && ogImage) {
+      micro.imageUrl = ogImage;
+    }
     return micro;
   }
 

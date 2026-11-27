@@ -16,6 +16,8 @@ export const PREF_KEYS = {
   refCollapsedCards: 'recipe-binder:refCollapsedCards',
   notesPinnedCards: 'recipe-binder:notesPinnedCards',
   notesCollapsedCards: 'recipe-binder:notesCollapsedCards',
+  recipePinnedCards: 'recipe-binder:recipePinnedCards',
+  recipeCollapsedCards: 'recipe-binder:recipeCollapsedCards',
   aiConfig: 'recipe-binder:aiConfig',
 };
 

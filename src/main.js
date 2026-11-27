@@ -21,10 +21,16 @@ import {
   DEFAULT_AI_CONFIG,
   appendGeneratedMethodToRecipe,
   askAboutRecipeWithAi,
+  autofillMissingRecipeFieldsWithAi,
+  cleanupRecipeDraftWithAi,
+  estimateRecipeYieldWithAi,
   extractRecipeWithAi,
   generateCookingMethodWithAi,
+  generateStorageReheatWithAi,
   isAiReady,
+  mergeAiAutofillIntoDraft,
   normalizeAiConfig,
+  suggestRecipeTitleWithAi,
   summarizeNoteWithAi,
   testAiConnection,
 } from './lib/ai.js';
@@ -99,6 +105,7 @@ import { renderDetailView } from './ui/detailView.js';
 import { renderDividersView } from './ui/dividersView.js';
 import { renderEditorView } from './ui/editorView.js';
 import {
+  compressImageFileToDataUrl,
   createWakeLockController,
   downloadBlob,
   downloadJson,
@@ -222,12 +229,17 @@ const state = {
   selectedRecipeId: null,
   editingRecipeId: null,
   draftRecipe: null,
+  editorAiBusy: '',
+  editorAiUndoSnapshot: null,
   activeDividerId: 'all',
   favoritesOnly: false,
   activeMethod: '',
   activeTag: '',
   searchQuery: '',
-  sortBy: 'updated',
+  sortBy: 'title',
+  recipePinnedCards: readSavedIdSet(PREF_KEYS.recipePinnedCards),
+  recipeCollapsedCards: readSavedIdSet(PREF_KEYS.recipeCollapsedCards),
+  recipePinnedOnly: false,
   scaleFactor: 1,
   activeMethodIndex: 0,
   activeTechniqueId: null,
@@ -480,6 +492,9 @@ function renderMainContent() {
       recipe: state.draftRecipe || existing || { dividerId: defaultDivider },
       dividers: state.dividers,
       isNew,
+      aiConfig: state.aiConfig,
+      editorAiBusy: state.editorAiBusy,
+      editorAiUndoAvailable: Boolean(state.editorAiUndoSnapshot),
     });
   }
 
@@ -604,6 +619,9 @@ function renderMainContent() {
     searchQuery: state.searchQuery,
     sortBy: state.sortBy,
     isDragOver: state.isDragOver,
+    pinnedCards: state.recipePinnedCards,
+    collapsedCards: state.recipeCollapsedCards,
+    pinnedOnly: state.recipePinnedOnly,
   });
 }
 
@@ -830,6 +848,7 @@ function readEditorFormIntoDraft() {
     title: String(fd.get('title') || ''),
     dividerId: String(fd.get('dividerId') || state.dividers[0]?.id || 'weeknight'),
     source: String(fd.get('source') || ''),
+    imageUrl: String(fd.get('imageUrl') || '').trim(),
     summary: String(fd.get('summary') || ''),
     prepMinutes: Number(fd.get('prepMinutes') || 0),
     cookMinutes: methods[0]?.cookMinutes ?? 0,
@@ -843,6 +862,9 @@ function readEditorFormIntoDraft() {
     steps: methods[0]?.steps || [],
     methods: methods.length > 0 ? methods : [{ id: 'method-1', name: '', cookMinutes: 0, note: '', steps: [] }],
     notes: String(fd.get('notes') || ''),
+    storageNotes: String(fd.get('storageNotes') || ''),
+    reheatNotes: String(fd.get('reheatNotes') || ''),
+    sourceTranscript: String(fd.get('sourceTranscript') || ''),
     favorite: fd.get('favorite') === 'on',
     createdAt: existing?.createdAt || state.draftRecipe?.createdAt || '',
   };
@@ -875,6 +897,8 @@ async function handleAction(action, target) {
     }
     if (nextView !== 'editor') {
       state.draftRecipe = null;
+      state.editorAiBusy = '';
+      state.editorAiUndoSnapshot = null;
     }
     state.view = nextView;
     render();
@@ -893,6 +917,57 @@ async function handleAction(action, target) {
     if (state.favoritesOnly) {
       state.activeDividerId = 'all';
     }
+    render();
+    return;
+  }
+
+  if (action === 'toggle-recipe-pinned-only') {
+    state.recipePinnedOnly = !state.recipePinnedOnly;
+    render();
+    return;
+  }
+
+  if (action === 'toggle-pin-recipe-card') {
+    const id = target.dataset.recipeId || '';
+    if (!id) return;
+    if (state.recipePinnedCards.has(id)) {
+      state.recipePinnedCards.delete(id);
+    } else {
+      state.recipePinnedCards.add(id);
+    }
+    saveIdSet(PREF_KEYS.recipePinnedCards, state.recipePinnedCards);
+    render();
+    return;
+  }
+
+  if (action === 'toggle-collapse-recipe-card') {
+    const id = target.dataset.recipeId || '';
+    if (!id) return;
+    if (state.recipeCollapsedCards.has(id)) {
+      state.recipeCollapsedCards.delete(id);
+    } else {
+      state.recipeCollapsedCards.add(id);
+    }
+    saveIdSet(PREF_KEYS.recipeCollapsedCards, state.recipeCollapsedCards);
+    render();
+    return;
+  }
+
+  if (action === 'toggle-collapse-all-recipes') {
+    const ids = String(target.dataset.cardIds || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (ids.length === 0) return;
+    const allCollapsed = ids.every((id) => state.recipeCollapsedCards.has(id));
+    for (const id of ids) {
+      if (allCollapsed) {
+        state.recipeCollapsedCards.delete(id);
+      } else {
+        state.recipeCollapsedCards.add(id);
+      }
+    }
+    saveIdSet(PREF_KEYS.recipeCollapsedCards, state.recipeCollapsedCards);
     render();
     return;
   }
@@ -926,6 +1001,7 @@ async function handleAction(action, target) {
   if (action === 'clear-filters') {
     state.activeDividerId = 'all';
     state.favoritesOnly = false;
+    state.recipePinnedOnly = false;
     state.activeMethod = '';
     state.activeTag = '';
     state.searchQuery = '';
@@ -967,6 +1043,8 @@ async function handleAction(action, target) {
     resetCookSession(true);
     state.editingRecipeId = null;
     state.draftRecipe = null;
+    state.editorAiBusy = '';
+    state.editorAiUndoSnapshot = null;
     state.view = 'editor';
     render();
     return;
@@ -975,6 +1053,8 @@ async function handleAction(action, target) {
   if (action === 'edit-recipe') {
     resetCookSession(true);
     state.draftRecipe = null;
+    state.editorAiBusy = '';
+    state.editorAiUndoSnapshot = null;
     state.editingRecipeId = target.dataset.recipeId || state.selectedRecipeId;
     state.view = 'editor';
     render();
@@ -983,6 +1063,8 @@ async function handleAction(action, target) {
 
   if (action === 'cancel-edit') {
     state.draftRecipe = null;
+    state.editorAiBusy = '';
+    state.editorAiUndoSnapshot = null;
     state.view = state.editingRecipeId && state.selectedRecipeId ? 'detail' : 'collection';
     state.editingRecipeId = null;
     render();
@@ -1436,7 +1518,7 @@ async function handleAction(action, target) {
       servingSize: recipe.servingSize || '1 serving',
       storedDate: today,
       bestByDate: bestBy,
-      reheatNotes: '',
+      reheatNotes: recipe.reheatNotes || '',
     });
     const nextItems = upsertMealPrepItem(
       state.mealPrepData.freezerItems || [],
@@ -2114,6 +2196,7 @@ async function handleAction(action, target) {
         sourceLabel: 'cooking video transcript',
         sourceUrl: item.url,
         sourceTitle: item.title,
+        sourceTranscript: item.transcript,
         dividers: state.dividers,
         fallbackDividerId,
         config: state.aiConfig,
@@ -2236,6 +2319,162 @@ async function handleAction(action, target) {
 
   if (action === 'cook-qa-quick-ask') {
     await submitCookQaQuestion(target.dataset.question || '');
+    return;
+  }
+
+  if (action === 'cook-qa-save-answer') {
+    const msgIdx = Number(target.dataset.msgIndex);
+    const saveTarget = target.dataset.target || '';
+    const msg = Number.isInteger(msgIdx) ? state.cookQaMessages[msgIdx] : null;
+    const recipe = state.recipes.find((r) => r.id === state.selectedRecipeId && !r.deleted);
+    if (!msg || !msg.text || !recipe) return;
+
+    const cleanAnswer = String(msg.text).trim();
+    let patch = {};
+    let label = "Cook's Margin Notes";
+
+    if (saveTarget === 'storageNotes') {
+      const existing = String(recipe.storageNotes || '').trim();
+      patch = { storageNotes: existing ? `${existing}\n\n${cleanAnswer}` : cleanAnswer };
+      label = 'Storage & Freezer Notes';
+    } else if (saveTarget === 'reheatNotes') {
+      const existing = String(recipe.reheatNotes || '').trim();
+      patch = { reheatNotes: existing ? `${existing}\n\n${cleanAnswer}` : cleanAnswer };
+      label = 'Microwave & Reheat Notes';
+    } else if (saveTarget === 'step') {
+      const methods = getRecipeMethods(recipe);
+      const idx = Math.min(Math.max(0, Number(state.activeMethodIndex) || 0), methods.length - 1);
+      const nextMethods = methods.map((m, i) =>
+        i === idx ? { ...m, steps: [...(m.steps || []), cleanAnswer.replace(/\s*\n+\s*/g, ' ')] } : m
+      );
+      patch = { methods: nextMethods, steps: nextMethods[0].steps };
+      label = `${methods[idx]?.name || 'Instructions'} steps`;
+    } else {
+      const existing = String(recipe.notes || '').trim();
+      patch = { notes: existing ? `${existing}\n\n${cleanAnswer}` : cleanAnswer };
+    }
+
+    const saved = await saveRecipe({ ...recipe, ...patch });
+    applySnapshotToState(await getSnapshot());
+    setNotice('positive', `Saved AI answer to ${label}.`);
+    render();
+    pushRecipeToCloud(saved, state.dividers[0]?.id).catch((err) => {
+      console.error('Recipe cloud sync failed:', err);
+    });
+    return;
+  }
+
+  if (action === 'editor-remove-image') {
+    const draft = readEditorFormIntoDraft();
+    if (!draft) return;
+    state.draftRecipe = { ...draft, imageUrl: '' };
+    setNotice('positive', 'Removed recipe photo from draft.');
+    render();
+    return;
+  }
+
+  if (action === 'editor-ai-undo') {
+    if (!state.editorAiUndoSnapshot) return;
+    state.draftRecipe = state.editorAiUndoSnapshot;
+    state.editorAiUndoSnapshot = null;
+    setNotice('positive', 'Restored recipe fields before last AI edit.');
+    render();
+    return;
+  }
+
+  if (
+    action === 'editor-ai-autofill' ||
+    action === 'editor-ai-cleanup' ||
+    action === 'editor-ai-title' ||
+    action === 'editor-ai-yield' ||
+    action === 'editor-ai-storage' ||
+    action === 'editor-ai-from-transcript'
+  ) {
+    const draft = readEditorFormIntoDraft();
+    if (!draft) return;
+    if (!isAiReady(state.aiConfig)) {
+      state.draftRecipe = draft;
+      state.view = 'sync';
+      setNotice('warning', 'Configure Local Ollama or Gemini API below to use Editor AI.');
+      render();
+      return;
+    }
+
+    const taskKey = action.replace('editor-ai-', '');
+    state.editorAiUndoSnapshot = draft;
+    state.draftRecipe = draft;
+    state.editorAiBusy = taskKey;
+    render();
+
+    try {
+      const fallbackDividerId =
+        state.activeDividerId !== 'all' ? state.activeDividerId : state.dividers[0]?.id || 'weeknight';
+
+      if (action === 'editor-ai-autofill') {
+        const patch = await autofillMissingRecipeFieldsWithAi({ recipe: draft, config: state.aiConfig });
+        state.draftRecipe = mergeAiAutofillIntoDraft(draft, patch);
+        setNotice('positive', 'Auto-filled missing fields (existing values preserved). Click "Undo AI Fill" to revert.');
+      } else if (action === 'editor-ai-cleanup') {
+        state.draftRecipe = await cleanupRecipeDraftWithAi({
+          recipe: draft,
+          dividers: state.dividers,
+          fallbackDividerId,
+          config: state.aiConfig,
+        });
+        setNotice('positive', 'Cleaned up ingredients and steps with AI. Review and save.');
+      } else if (action === 'editor-ai-title') {
+        const res = await suggestRecipeTitleWithAi({ recipe: draft, config: state.aiConfig });
+        state.draftRecipe = {
+          ...draft,
+          title: res.title || draft.title,
+          summary: draft.summary || res.summary || '',
+        };
+        setNotice('positive', `Suggested title: "${state.draftRecipe.title}".`);
+      } else if (action === 'editor-ai-yield') {
+        const res = await estimateRecipeYieldWithAi({ recipe: draft, config: state.aiConfig });
+        state.draftRecipe = {
+          ...draft,
+          servings: res.servings || draft.servings,
+          servingSize: res.servingSize || draft.servingSize,
+        };
+        setNotice('positive', `Estimated ${state.draftRecipe.servings} servings (${state.draftRecipe.servingSize || 'standard'}).`);
+      } else if (action === 'editor-ai-storage') {
+        const res = await generateStorageReheatWithAi({ recipe: draft, config: state.aiConfig });
+        state.draftRecipe = {
+          ...draft,
+          storageNotes: res.storageNotes || draft.storageNotes,
+          reheatNotes: res.reheatNotes || draft.reheatNotes,
+        };
+        setNotice('positive', 'Generated Freezer/Storage and Microwave/Reheating notes.');
+      } else if (action === 'editor-ai-from-transcript') {
+        if (!draft.sourceTranscript.trim()) {
+          throw new Error('Paste or attach a video transcript in the box first.');
+        }
+        const extracted = await extractRecipeWithAi({
+          text: draft.sourceTranscript,
+          sourceLabel: 'cooking video transcript',
+          sourceUrl: draft.source,
+          sourceTitle: draft.title,
+          sourceTranscript: draft.sourceTranscript,
+          dividers: state.dividers,
+          fallbackDividerId,
+          config: state.aiConfig,
+        });
+        state.draftRecipe = {
+          ...extracted,
+          id: draft.id || extracted.id,
+          imageUrl: draft.imageUrl || '',
+          favorite: draft.favorite,
+          createdAt: draft.createdAt || '',
+        };
+        setNotice('positive', 'Re-extracted recipe from reference transcript. Review and save.');
+      }
+    } catch (err) {
+      setNotice('danger', err?.message || 'Editor AI action failed.');
+    } finally {
+      state.editorAiBusy = '';
+      render();
+    }
     return;
   }
 
@@ -2951,6 +3190,25 @@ document.addEventListener('change', async (event) => {
     return;
   }
 
+  if (target.id === 'editor-image-file-input') {
+    const file = target.files?.[0];
+    if (!file) return;
+    const draft = readEditorFormIntoDraft();
+    try {
+      const compressed = await compressImageFileToDataUrl(file, { maxWidth: 640, quality: 0.78 });
+      if (draft) {
+        state.draftRecipe = { ...draft, imageUrl: compressed };
+      }
+      setNotice('positive', 'Compressed and attached recipe photo.');
+    } catch (err) {
+      setNotice('danger', err?.message || 'Could not process image file.');
+    } finally {
+      target.value = '';
+      render();
+    }
+    return;
+  }
+
   if (target.dataset.action === 'toggle-matcher-staples') {
     state.matcherIncludeStaples = Boolean(target.checked);
     render();
@@ -3017,6 +3275,8 @@ document.addEventListener('submit', async (event) => {
     await pushRecipeToCloud(saved, state.dividers[0]?.id);
     state.editingRecipeId = null;
     state.draftRecipe = null;
+    state.editorAiBusy = '';
+    state.editorAiUndoSnapshot = null;
     state.activeMethodIndex = 0;
     state.selectedRecipeId = saved.id;
     state.view = 'detail';

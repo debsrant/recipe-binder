@@ -3074,6 +3074,246 @@ textarea {
   margin-bottom: 2px;
 }
 
+.cook-qa-save-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+  align-items: center;
+}
+
+/* Redesigned Horizontal, Pinnable, Collapsible Collection Cards */
+.recipe-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.recipe-card {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+
+.recipe-card-title-text {
+  margin: 0;
+  font-size: 17px;
+  color: inherit;
+}
+
+.recipe-card-open-title:hover .recipe-card-title-text {
+  color: var(--primary);
+}
+
+.recipe-horiz-body {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.recipe-horiz-body.is-single-col {
+  grid-template-columns: 1fr;
+}
+
+.recipe-thumb-btn {
+  display: block;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-subtle);
+  cursor: pointer;
+  width: 120px;
+  height: 90px;
+}
+
+.recipe-card-thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.recipe-horiz-main {
+  display: grid;
+  gap: 8px;
+}
+
+.recipe-meta-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Collapsible Detail & Editor Sections */
+.detail-header-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.detail-header-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.detail-header-thumb {
+  width: 128px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  flex-shrink: 0;
+}
+
+.detail-collapsible {
+  padding: 0;
+}
+
+.detail-collapsible-summary,
+.editor-collapsible-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--primary);
+}
+
+.detail-collapsible-summary {
+  padding: 13px 16px;
+}
+
+.detail-collapsible-summary::-webkit-details-marker,
+.editor-collapsible-summary::-webkit-details-marker {
+  display: none;
+}
+
+.detail-collapsible-summary::after,
+.editor-collapsible-summary::after {
+  content: '▾';
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: 6px;
+}
+
+.detail-collapsible[open] > .detail-collapsible-summary::after,
+.editor-collapsible[open] > .editor-collapsible-summary::after {
+  content: '▴';
+}
+
+.detail-collapsible-body {
+  padding: 0 16px 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.storage-reheat-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.storage-reheat-block h3 {
+  margin: 0 0 3px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.storage-reheat-block p {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.editor-collapsible {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+  margin-bottom: 14px;
+}
+
+.editor-ai-box {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  border-left: 4px solid var(--primary);
+}
+
+.editor-collapsible-summary {
+  padding: 10px 14px;
+  font-size: 14px;
+}
+
+.editor-collapsible-body {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.editor-transcript-box {
+  font-size: 13px;
+  line-height: 1.45;
+  background: var(--bg-input);
+}
+
+.editor-image-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.editor-image-controls input[type='text'] {
+  flex: 1;
+  min-width: 220px;
+}
+
+.editor-image-preview-wrap {
+  margin-top: 8px;
+}
+
+.editor-image-preview {
+  max-width: 180px;
+  max-height: 130px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  object-fit: cover;
+  display: block;
+}
+
+@media (max-width: 640px) {
+  .recipe-horiz-body {
+    grid-template-columns: 1fr;
+  }
+
+  .recipe-thumb-btn {
+    width: 100%;
+    height: 160px;
+  }
+
+  .detail-header-layout {
+    flex-direction: column;
+  }
+
+  .detail-header-thumb {
+    width: 100%;
+    height: 170px;
+  }
+}
+
 /* Print Recipe Sheet */
 @page {
   margin: 0.6in;

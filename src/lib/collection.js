@@ -114,6 +114,28 @@ function getMinCookMinutes(recipe) {
 }
 
 /**
+ * Validates and normalizes a recipe image URL (`http:`, `https:`, or compressed `data:image/` URL).
+ */
+export function normalizeSafeImageUrl(rawUrl) {
+  const candidate = String(rawUrl || '').trim();
+  if (!candidate) return '';
+  if (/^data:image\/(?:png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(candidate)) {
+    return candidate;
+  }
+  const withScheme =
+    !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(candidate) && /^[^\s]+\.[^\s]+/.test(candidate)
+      ? `https://${candidate}`
+      : candidate;
+  try {
+    const parsed = new URL(withScheme);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Normalizes a recipe record into a consistent structure safe for storage and sync.
  */
 export function normalizeRecipe(input, fallbackDividerId = 'weeknight') {
@@ -130,6 +152,7 @@ export function normalizeRecipe(input, fallbackDividerId = 'weeknight') {
     dividerId: String(input?.dividerId || '').trim() || fallbackDividerId,
     summary: String(input?.summary || '').trim(),
     source: String(input?.source || '').trim(),
+    imageUrl: normalizeSafeImageUrl(input?.imageUrl || ''),
     prepMinutes: Number.isFinite(prepNum) && prepNum >= 0 ? Math.round(prepNum) : 0,
     cookMinutes: primaryMethod.cookMinutes,
     servings: Number.isFinite(servingsNum) && servingsNum > 0 ? Number(servingsNum) : 4,
@@ -139,6 +162,9 @@ export function normalizeRecipe(input, fallbackDividerId = 'weeknight') {
     steps: primaryMethod.steps,
     methods,
     notes: String(input?.notes || '').trim(),
+    storageNotes: String(input?.storageNotes || '').trim(),
+    reheatNotes: String(input?.reheatNotes || '').trim(),
+    sourceTranscript: String(input?.sourceTranscript || '').trim(),
     favorite: Boolean(input?.favorite),
     createdAt: String(input?.createdAt || nowIso),
     updatedMs: Number.isFinite(updatedMsNum) && updatedMsNum > 0 ? updatedMsNum : Date.now(),
@@ -147,18 +173,41 @@ export function normalizeRecipe(input, fallbackDividerId = 'weeknight') {
 }
 
 /**
- * Filters active (non-deleted) recipes by divider, favorites, tag, and query, then sorts them.
+ * Filters active (non-deleted) recipes by divider, favorites, pinnedOnly, tag, and query,
+ * keeping pinned items first in pinned order and sorting remaining items by `sortBy`.
  */
 export function filterAndSortRecipes(
   recipes,
-  { dividerId = 'all', favoritesOnly = false, method = '', tag = '', query = '', sortBy = 'updated' } = {}
+  {
+    dividerId = 'all',
+    favoritesOnly = false,
+    method = '',
+    tag = '',
+    query = '',
+    sortBy = 'updated',
+    pinnedSet = null,
+    pinnedOnly = false,
+  } = {}
 ) {
   const cleanQuery = String(query || '').trim().toLowerCase();
   const cleanMethod = String(method || '').trim().toLowerCase();
   const cleanTag = normalizeTag(tag);
+  const pinSet =
+    pinnedSet instanceof Set
+      ? pinnedSet
+      : Array.isArray(pinnedSet)
+      ? new Set(pinnedSet)
+      : new Set();
+
+  const pinOrder = new Map();
+  let pinIdx = 0;
+  for (const id of pinSet) {
+    pinOrder.set(id, pinIdx++);
+  }
 
   const filtered = (recipes || []).filter((recipe) => {
     if (!recipe || recipe.deleted) return false;
+    if (pinnedOnly && !pinSet.has(recipe.id)) return false;
     if (favoritesOnly && !recipe.favorite) return false;
     if (dividerId && dividerId !== 'all' && recipe.dividerId !== dividerId) return false;
     if (cleanTag && !(recipe.tags || []).includes(cleanTag)) return false;
@@ -178,6 +227,8 @@ export function filterAndSortRecipes(
         recipe.source,
         recipe.servingSize,
         recipe.notes,
+        recipe.storageNotes,
+        recipe.reheatNotes,
         ...(recipe.tags || []),
         ...(recipe.ingredients || []),
         ...(recipe.steps || []),
@@ -193,14 +244,27 @@ export function filterAndSortRecipes(
 
   const sorted = [...filtered];
   sorted.sort((a, b) => {
+    if (pinSet.size > 0) {
+      const aPinned = pinSet.has(a.id);
+      const bPinned = pinSet.has(b.id);
+      if (aPinned !== bPinned) return aPinned ? -1 : 1;
+      if (aPinned && bPinned) {
+        return (pinOrder.get(a.id) ?? 0) - (pinOrder.get(b.id) ?? 0);
+      }
+    }
+
     if (sortBy === 'title') {
-      return a.title.localeCompare(b.title);
+      return String(a.title || '')
+        .trim()
+        .localeCompare(String(b.title || '').trim(), undefined, { sensitivity: 'base' });
     }
     if (sortBy === 'time') {
       const totalA = (a.prepMinutes || 0) + getMinCookMinutes(a);
       const totalB = (b.prepMinutes || 0) + getMinCookMinutes(b);
       if (totalA !== totalB) return totalA - totalB;
-      return a.title.localeCompare(b.title);
+      return String(a.title || '')
+        .trim()
+        .localeCompare(String(b.title || '').trim(), undefined, { sensitivity: 'base' });
     }
     if (sortBy === 'favorite') {
       if (Boolean(a.favorite) !== Boolean(b.favorite)) {

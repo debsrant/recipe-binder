@@ -4,7 +4,7 @@ import {
   getAiStatusLabel,
   isAiReady,
 } from '../lib/ai.js';
-import { getRecipeMethods } from '../lib/collection.js';
+import { getRecipeMethods, normalizeSafeImageUrl } from '../lib/collection.js';
 import { formatQuantity } from '../lib/scaling.js';
 import { renderLinkedStepHtml } from '../lib/techniques.js';
 import { convertIngredientLine } from '../lib/units.js';
@@ -212,6 +212,24 @@ function renderClassicSheet({
           : ''
       }
 
+      ${
+        recipe.storageNotes && String(recipe.storageNotes).trim()
+          ? `<aside class="classic-notes">
+              <h3>Storage &amp; Freezer</h3>
+              <p>${escapeHtml(recipe.storageNotes)}</p>
+            </aside>`
+          : ''
+      }
+
+      ${
+        recipe.reheatNotes && String(recipe.reheatNotes).trim()
+          ? `<aside class="classic-notes">
+              <h3>Microwave &amp; Reheating</h3>
+              <p>${escapeHtml(recipe.reheatNotes)}</p>
+            </aside>`
+          : ''
+      }
+
       ${tagsLine}
     </article>
   `;
@@ -258,11 +276,22 @@ function renderCookAiPanel({
       ? `<div class="cook-qa-thread">
           ${cookQaMessages
             .map(
-              (m) => `<div class="cook-qa-msg ${
+              (m, msgIdx) => `<div class="cook-qa-msg ${
                 m.role === 'assistant' ? 'is-assistant' : 'is-user'
               }">
                 <span class="cook-qa-role">${m.role === 'assistant' ? 'AI Cook Assistant' : 'You'}</span>
                 <div>${escapeHtml(m.text)}</div>
+                ${
+                  m.role === 'assistant'
+                    ? `<div class="cook-qa-save-bar">
+                        <span class="muted" style="font-size: 11px;">Save to card:</span>
+                        <button type="button" class="tag-chip" data-action="cook-qa-save-answer" data-target="notes" data-msg-index="${msgIdx}">+ Margin Notes</button>
+                        <button type="button" class="tag-chip" data-action="cook-qa-save-answer" data-target="storageNotes" data-msg-index="${msgIdx}">+ Storage</button>
+                        <button type="button" class="tag-chip" data-action="cook-qa-save-answer" data-target="reheatNotes" data-msg-index="${msgIdx}">+ Reheat</button>
+                        <button type="button" class="tag-chip" data-action="cook-qa-save-answer" data-target="step" data-msg-index="${msgIdx}">+ Add Step</button>
+                      </div>`
+                    : ''
+                }
               </div>`
             )
             .join('')}
@@ -632,6 +661,11 @@ export function renderDetailView({
     : '';
 
   const activeMethodBadgeLabel = activeMethod.name || 'Standard';
+  const safeImage = normalizeSafeImageUrl(recipe.imageUrl);
+  const hasMarginNotes = Boolean(String(recipe.notes || '').trim());
+  const hasStorageNotes = Boolean(String(recipe.storageNotes || '').trim());
+  const hasReheatNotes = Boolean(String(recipe.reheatNotes || '').trim());
+  const hasStorageOrReheat = hasStorageNotes || hasReheatNotes;
 
   const printSheetHtml = renderClassicSheet({
     recipe,
@@ -660,18 +694,29 @@ export function renderDetailView({
             <span class="detail-updated">Updated ${escapeHtml(formatDateShort(recipe.updatedMs))}</span>
           </div>
 
-          <h1 class="detail-title">${escapeHtml(recipe.title)}</h1>
+          <div class="detail-header-layout">
+            <div class="detail-header-main">
+              <h1 class="detail-title">${escapeHtml(recipe.title)}</h1>
 
-          ${
-            recipe.source
-              ? `<p class="detail-source">Source: ${escapeHtml(recipe.source)}</p>`
-              : ''
-          }
-          ${
-            recipe.summary
-              ? `<p class="detail-summary">${escapeHtml(recipe.summary)}</p>`
-              : ''
-          }
+              ${
+                recipe.source
+                  ? `<p class="detail-source">Source: ${escapeHtml(recipe.source)}</p>`
+                  : ''
+              }
+              ${
+                recipe.summary
+                  ? `<p class="detail-summary">${escapeHtml(recipe.summary)}</p>`
+                  : ''
+              }
+            </div>
+            ${
+              safeImage
+                ? `<img class="detail-header-thumb" src="${escapeHtml(safeImage)}" alt="${escapeHtml(
+                    recipe.title
+                  )}" />`
+                : ''
+            }
+          </div>
 
           <div class="detail-kpi-strip">
             <div class="kpi-box">
@@ -727,58 +772,99 @@ export function renderDetailView({
               </ul>
             </section>
 
-            <section class="panel-card margin-notes-card">
-              <h2>Cook's Margin Notes</h2>
-              <p class="${recipe.notes ? 'margin-notes-text' : 'muted'}">
+            <details class="panel-card detail-collapsible margin-notes-card" ${hasMarginNotes ? 'open' : ''}>
+              <summary class="detail-collapsible-summary">
+                <span>Cook's Margin Notes</span>
+                <span class="badge">${hasMarginNotes ? 'Saved' : 'Empty'}</span>
+              </summary>
+              <div class="detail-collapsible-body">
+                <p class="${hasMarginNotes ? 'margin-notes-text' : 'muted'}">
+                  ${
+                    hasMarginNotes
+                      ? escapeHtml(recipe.notes)
+                      : 'No margin notes yet. Edit this card or save an AI Cook Assistant tip to add tweaks.'
+                  }
+                </p>
+              </div>
+            </details>
+
+            <details class="panel-card detail-collapsible" ${hasStorageOrReheat ? 'open' : ''}>
+              <summary class="detail-collapsible-summary">
+                <span>Storage, Freezer &amp; Reheating</span>
+                <span class="badge">${hasStorageOrReheat ? 'Ready' : 'Empty'}</span>
+              </summary>
+              <div class="detail-collapsible-body">
                 ${
-                  recipe.notes
-                    ? escapeHtml(recipe.notes)
-                    : 'No margin notes yet. Edit this card after cooking to save tweaks and reminders.'
+                  hasStorageOrReheat
+                    ? `<div class="storage-reheat-stack">
+                        ${
+                          hasStorageNotes
+                            ? `<div class="storage-reheat-block">
+                                <h3>Freezer &amp; Storage</h3>
+                                <p>${escapeHtml(recipe.storageNotes)}</p>
+                              </div>`
+                            : ''
+                        }
+                        ${
+                          hasReheatNotes
+                            ? `<div class="storage-reheat-block">
+                                <h3>Microwave &amp; Reheating</h3>
+                                <p>${escapeHtml(recipe.reheatNotes)}</p>
+                              </div>`
+                            : ''
+                        }
+                      </div>`
+                    : '<p class="muted" style="margin: 0;">No storage or reheating instructions yet. Add them in Edit Recipe (or generate them with AI).</p>'
                 }
-              </p>
-            </section>
+              </div>
+            </details>
 
             ${
               (linkedNotes || []).length > 0
-                ? `<section class="panel-card linked-notes-card no-print">
-                    <h2>Linked Notes, Videos &amp; Files</h2>
-                    <ul class="linked-notes-list">
-                      ${linkedNotes
-                        .map((note) => {
-                          const typeLabel =
-                            note.type === 'video'
-                              ? 'Video'
-                              : note.type === 'website'
-                              ? 'Website'
-                              : note.type === 'file'
-                              ? 'File / PDF'
-                              : 'Note';
-                          const safeUrl = /^https?:\/\//i.test(note.url || '') ? note.url : '';
-                          return `<li class="linked-note-row">
-                            <div class="linked-note-info">
-                              <span class="badge badge-divider">${escapeHtml(typeLabel)}</span>
-                              <strong>${escapeHtml(note.title)}</strong>
-                            </div>
-                            <div class="linked-note-actions">
-                              ${
-                                safeUrl
-                                  ? `<a class="btn btn-sm btn-outline" href="${escapeHtml(
-                                      safeUrl
-                                    )}" target="_blank" rel="noopener noreferrer">Open ↗</a>`
-                                  : ''
-                              }
-                              <button
-                                type="button"
-                                class="btn btn-sm btn-outline"
-                                data-action="open-note-in-tab"
-                                data-note-id="${escapeHtml(note.id)}"
-                              >View in Notes</button>
-                            </div>
-                          </li>`;
-                        })
-                        .join('')}
-                    </ul>
-                  </section>`
+                ? `<details class="panel-card detail-collapsible linked-notes-card no-print">
+                    <summary class="detail-collapsible-summary">
+                      <span>Linked Notes, Videos &amp; Files</span>
+                      <span class="badge">${linkedNotes.length}</span>
+                    </summary>
+                    <div class="detail-collapsible-body">
+                      <ul class="linked-notes-list">
+                        ${linkedNotes
+                          .map((note) => {
+                            const typeLabel =
+                              note.type === 'video'
+                                ? 'Video'
+                                : note.type === 'website'
+                                ? 'Website'
+                                : note.type === 'file'
+                                ? 'File / PDF'
+                                : 'Note';
+                            const safeUrl = /^https?:\/\//i.test(note.url || '') ? note.url : '';
+                            return `<li class="linked-note-row">
+                              <div class="linked-note-info">
+                                <span class="badge badge-divider">${escapeHtml(typeLabel)}</span>
+                                <strong>${escapeHtml(note.title)}</strong>
+                              </div>
+                              <div class="linked-note-actions">
+                                ${
+                                  safeUrl
+                                    ? `<a class="btn btn-sm btn-outline" href="${escapeHtml(
+                                        safeUrl
+                                      )}" target="_blank" rel="noopener noreferrer">Open ↗</a>`
+                                    : ''
+                                }
+                                <button
+                                  type="button"
+                                  class="btn btn-sm btn-outline"
+                                  data-action="open-note-in-tab"
+                                  data-note-id="${escapeHtml(note.id)}"
+                                >View in Notes</button>
+                              </div>
+                            </li>`;
+                          })
+                          .join('')}
+                      </ul>
+                    </div>
+                  </details>`
                 : ''
             }
           </div>

@@ -110,3 +110,46 @@ export function createWakeLockController(onStateChange) {
     release: releaseLock,
   };
 }
+
+/**
+ * Compresses an uploaded image File/Blob in the browser to a compact data URL safe for IndexedDB & Firestore.
+ */
+export function compressImageFileToDataUrl(file, { maxWidth = 640, quality = 0.78 } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      reject(new Error('No image file selected.'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read the selected image file.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Selected file is not a valid image.'));
+      img.onload = () => {
+        try {
+          const ratio = img.width > maxWidth ? maxWidth / img.width : 1;
+          const width = Math.max(1, Math.round(img.width * ratio));
+          const height = Math.max(1, Math.round(img.height * ratio));
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(String(reader.result || ''));
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          let dataUrl = canvas.toDataURL('image/webp', quality);
+          if (!dataUrl.startsWith('data:image/webp')) {
+            dataUrl = canvas.toDataURL('image/jpeg', quality);
+          }
+          resolve(dataUrl);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  });
+}
