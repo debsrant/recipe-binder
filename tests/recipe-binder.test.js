@@ -29,6 +29,12 @@ import {
   parseTextRecipe,
 } from '../src/lib/recipeImport.js';
 import { validateRecipeUrl } from '../src/lib/webScraper.js';
+import {
+  aiJsonToRecipeDraft,
+  extractGeminiInteractionText,
+  extractJsonObjectFromText,
+  normalizeAiConfig,
+} from '../src/lib/ai.js';
 import { createZipBytes } from '../src/lib/zip.js';
 import {
   deleteNoteItem,
@@ -1403,4 +1409,47 @@ test('filterAndSortNotes pins first, auto-sorts A-Z, searches transcripts, and m
     'https://drive.google.com/drive/folders/abc12345678'
   );
   assert.equal(mergedSnap.notesData.items.find((i) => i.id === 'n3').deleted, true);
+});
+
+test('AI config normalization, Gemini v1 response extraction, and recipe draft mapping work reliably', () => {
+  const upgraded = normalizeAiConfig({
+    provider: 'gemini',
+    geminiModel: 'gemini-2.5-flash',
+    geminiApiKey: '  AIzaTestKey123  ',
+    ollamaUrl: 'http://127.0.0.1:11434/',
+  });
+  assert.equal(upgraded.provider, 'gemini');
+  assert.equal(upgraded.geminiModel, 'gemini-4-hydrogen');
+  assert.equal(upgraded.geminiApiKey, 'AIzaTestKey123');
+  assert.equal(upgraded.ollamaUrl, 'http://127.0.0.1:11434');
+
+  assert.equal(
+    extractGeminiInteractionText({
+      output_text: 'OK.',
+      steps: [],
+    }),
+    'OK.'
+  );
+  assert.equal(
+    extractGeminiInteractionText({
+      steps: [
+        { type: 'model_output', content: [{ type: 'text', text: '{"title":"Soup"}' }] },
+      ],
+    }),
+    '{"title":"Soup"}'
+  );
+
+  const parsedJson = extractJsonObjectFromText(
+    'Here you go:\n```json\n{"title":"Crispy Tofu","prepMinutes":10,"servings":2,"ingredients":["14 oz tofu"],"methods":[{"name":"Air Fryer","cookMinutes":18,"steps":["Cube tofu.","Air fry at 400 F."]}]}\n```'
+  );
+  const draft = aiJsonToRecipeDraft(parsedJson, {
+    sourceUrl: 'https://youtu.be/dQw4w9WgXcQ',
+    dividers: TEST_DIVIDERS,
+    fallbackDividerId: 'weeknight',
+  });
+  assert.equal(draft.title, 'Crispy Tofu');
+  assert.equal(draft.source, 'https://youtu.be/dQw4w9WgXcQ');
+  assert.equal(draft.methods[0].name, 'Air Fryer');
+  assert.equal(draft.methods[0].cookMinutes, 18);
+  assert.deepEqual(draft.ingredients, ['14 oz tofu']);
 });

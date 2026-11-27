@@ -340,6 +340,99 @@ function attachRecipeProxyMiddleware(middlewares) {
       });
     }
   });
+
+  const ollamaBase = String(process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(
+    /\/+$/,
+    ''
+  );
+
+  middlewares.use('/api/ai/ollama/tags', async (req, res, next) => {
+    if ((req.method || 'GET').toUpperCase() !== 'GET') {
+      next();
+      return;
+    }
+    try {
+      const upstream = await fetch(`${ollamaBase}/api/tags`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!upstream.ok) {
+        sendJson(res, 502, {
+          ok: false,
+          error: `Local Ollama returned HTTP ${upstream.status}.`,
+        });
+        return;
+      }
+      const data = await upstream.json();
+      const models = (Array.isArray(data?.models) ? data.models : [])
+        .map((m) => String(m?.name || '').trim())
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b));
+      sendJson(res, 200, { ok: true, models });
+    } catch {
+      sendJson(res, 502, {
+        ok: false,
+        error: `Could not reach Ollama at ${ollamaBase}. Make sure Ollama is running on your PC (ollama serve).`,
+      });
+    }
+  });
+
+  middlewares.use('/api/ai/ollama/chat', async (req, res, next) => {
+    if ((req.method || 'POST').toUpperCase() !== 'POST') {
+      next();
+      return;
+    }
+    try {
+      const chunks = [];
+      let totalBytes = 0;
+      const maxBytes = 1024 * 1024;
+      for await (const chunk of req) {
+        totalBytes += chunk.length;
+        if (totalBytes > maxBytes) {
+          sendJson(res, 413, { ok: false, error: 'AI request payload too large.' });
+          return;
+        }
+        chunks.push(chunk);
+      }
+      const bodyRaw = Buffer.concat(chunks).toString('utf-8');
+      const body = bodyRaw ? JSON.parse(bodyRaw) : {};
+      if (!body?.model || !Array.isArray(body?.messages)) {
+        sendJson(res, 400, { ok: false, error: 'Missing model or messages for Ollama chat.' });
+        return;
+      }
+
+      const upstream = await fetch(`${ollamaBase}/api/chat`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(60000),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: String(body.model),
+          messages: body.messages,
+          ...(body.format ? { format: body.format } : {}),
+          stream: false,
+        }),
+      });
+      if (!upstream.ok) {
+        const errText = await upstream.text().catch(() => '');
+        sendJson(res, 502, {
+          ok: false,
+          error: `Ollama error (${upstream.status}): ${errText.slice(0, 160)}`,
+        });
+        return;
+      }
+      const data = await upstream.json();
+      const content = String(data?.message?.content || data?.response || '').trim();
+      if (!content) {
+        sendJson(res, 502, { ok: false, error: 'Ollama returned an empty response.' });
+        return;
+      }
+      sendJson(res, 200, { ok: true, content, model: data?.model || body.model });
+    } catch (err) {
+      sendJson(res, 502, {
+        ok: false,
+        error: `Ollama request failed (${err?.message || 'network error'}). Make sure Ollama is running (ollama serve).`,
+      });
+    }
+  });
 }
 
 function recipeFetchProxyPlugin() {

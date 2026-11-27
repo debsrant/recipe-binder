@@ -1,3 +1,4 @@
+import { getAiStatusLabel, isAiReady } from '../lib/ai.js';
 import { escapeHtml } from './helpers.js';
 
 export function renderImportView({
@@ -7,7 +8,11 @@ export function renderImportView({
   pasteText = '',
   saveImmediately = false,
   isDragOver = false,
+  aiConfig = null,
+  isAiCleaning = false,
 }) {
+  const aiReady = isAiReady(aiConfig);
+  const aiLabel = getAiStatusLabel(aiConfig);
   return `
     <section class="import-shell">
       <div class="detail-action-bar">
@@ -89,10 +94,22 @@ export function renderImportView({
           rows="10"
           placeholder="Lemon Pasta&#10;Prep: 10 min | Cook: 15 min | Servings: 4&#10;&#10;Ingredients&#10;1 lb spaghetti&#10;3 tbsp butter&#10;1 lemon, zested and juiced&#10;&#10;Directions&#10;1. Boil pasta in salted water until al dente.&#10;2. Toss hot pasta with butter, lemon juice, and pasta water."
         >${escapeHtml(pasteText)}</textarea>
-        <div class="btn-row" style="margin-top: 10px;">
+        <div class="btn-row import-ai-bar" style="margin-top: 10px;">
           <button type="button" class="btn btn-primary" data-action="convert-pasted-text">Convert to Recipe</button>
+          <button
+            type="button"
+            class="btn btn-outline"
+            data-action="ai-convert-pasted-text"
+            ${isAiCleaning ? 'disabled' : ''}
+          >${isAiCleaning ? 'Cleaning with AI…' : 'AI Cleanup & Convert'}</button>
           <button type="button" class="btn btn-outline" data-action="paste-clipboard">Paste from Clipboard</button>
           <button type="button" class="btn btn-secondary" data-action="clear-paste-text">Clear</button>
+          <button
+            type="button"
+            class="badge ai-status-pill ${aiReady ? 'is-ready' : ''}"
+            data-action="open-ai-settings"
+            title="Configure Ollama or Gemini API in Sync & Backup"
+          >${escapeHtml(aiLabel)} · Configure →</button>
         </div>
       </div>
     </section>

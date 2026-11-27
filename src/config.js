@@ -16,6 +16,7 @@ export const PREF_KEYS = {
   refCollapsedCards: 'recipe-binder:refCollapsedCards',
   notesPinnedCards: 'recipe-binder:notesPinnedCards',
   notesCollapsedCards: 'recipe-binder:notesCollapsedCards',
+  aiConfig: 'recipe-binder:aiConfig',
 };
 
 export const RECIPE_PROXY_URL = (env.VITE_RECIPE_PROXY_URL || '').trim();

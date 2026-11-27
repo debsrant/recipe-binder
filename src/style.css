@@ -2974,6 +2974,30 @@ textarea {
   }
 }
 
+.ai-key-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.ai-key-row input {
+  flex: 1;
+  min-width: 220px;
+}
+
+.ai-status-pill {
+  cursor: pointer;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-strong);
+}
+
+.ai-status-pill.is-ready {
+  border-color: var(--pine);
+  color: var(--pine);
+  font-weight: 700;
+}
+
 /* Print Recipe Sheet */
 @page {
   margin: 0.6in;

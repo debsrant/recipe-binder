@@ -1,3 +1,4 @@
+import { isAiReady } from '../lib/ai.js';
 import {
   NOTE_TYPES,
   collectNoteTags,
@@ -90,6 +91,7 @@ function renderNoteEditorForm({
   driveFolderUrl = '',
   isFetchingTranscript = false,
   transcriptError = '',
+  isAiSummarizing = false,
 }) {
   const isNew = editingNoteId === '__new__';
   const item = draftNote ||
@@ -284,6 +286,12 @@ function renderNoteEditorForm({
                       class="btn btn-sm btn-outline"
                       data-action="clean-note-transcript"
                     >Clean Timestamps</button>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline"
+                      data-action="ai-summarize-note"
+                      ${isAiSummarizing ? 'disabled' : ''}
+                    >${isAiSummarizing ? 'Summarizing…' : 'Summarize into Notes (AI)'}</button>
                   </div>
                 </div>
                 ${
@@ -319,6 +327,7 @@ function renderNoteCard({
   embedExpanded,
   embedStartSec,
   transcriptExpanded,
+  aiBusyNoteId = '',
 }) {
   const cardId = `note-${item.id}`;
   const safeUrl = normalizeSafeUrl(item.url);
@@ -370,6 +379,16 @@ function renderNoteCard({
       `<button type="button" class="btn btn-sm btn-outline" data-action="note-convert-recipe" data-note-id="${escapeHtml(
         item.id
       )}">Convert to Recipe</button>`
+    );
+  }
+  if (item.type === 'video' && hasTranscript) {
+    const isBusy = aiBusyNoteId === item.id;
+    actionButtons.push(
+      `<button type="button" class="btn btn-sm btn-outline" data-action="ai-transcript-to-recipe" data-note-id="${escapeHtml(
+        item.id
+      )}" ${isBusy ? 'disabled' : ''}>${
+        isBusy ? 'Extracting Recipe…' : 'Transcript → Recipe (AI)'
+      }</button>`
     );
   }
 
@@ -598,6 +617,9 @@ export function renderNotesView({
   expandedTranscripts,
   isFetchingTranscript = false,
   transcriptError = '',
+  aiConfig = null,
+  aiBusyNoteId = '',
+  isAiSummarizing = false,
 }) {
   const data = normalizeNotesData(notesData);
   const pinnedSet = asIdSet(pinnedCards);
@@ -706,6 +728,12 @@ export function renderNotesView({
             <button type="button" class="btn btn-outline" data-action="new-note" data-note-type="website">+ Website</button>
             <button type="button" class="btn btn-outline" data-action="new-note" data-note-type="video">+ Video</button>
             <button type="button" class="btn btn-outline" data-action="new-note" data-note-type="file">+ Drive File</button>
+            <button
+              type="button"
+              class="badge ai-status-pill ${isAiReady(aiConfig) ? 'is-ready' : ''}"
+              data-action="open-ai-settings"
+              title="Configure Local Ollama or Gemini API in Sync & Backup"
+            >${isAiReady(aiConfig) ? 'AI: Ready' : 'AI: Off'}</button>
           </div>
         </div>
         <div class="tag-filter-bar" aria-label="Filter by clipping type">
@@ -725,6 +753,7 @@ export function renderNotesView({
               driveFolderUrl: data.googleDriveFolderUrl,
               isFetchingTranscript,
               transcriptError,
+              isAiSummarizing,
             })
           : ''
       }
@@ -742,6 +771,7 @@ export function renderNotesView({
                     embedExpanded: embedSet.has(item.id),
                     embedStartSec: startMap.get(item.id) || 0,
                     transcriptExpanded: transcriptSet.has(item.id),
+                    aiBusyNoteId,
                   })
                 )
                 .join('')}

@@ -18,6 +18,14 @@ import {
   toggleFavorite,
 } from './db/database.js';
 import {
+  DEFAULT_AI_CONFIG,
+  extractRecipeWithAi,
+  isAiReady,
+  normalizeAiConfig,
+  summarizeNoteWithAi,
+  testAiConnection,
+} from './lib/ai.js';
+import {
   getRecipeMethods,
   mergeCollectionSnapshots,
   normalizeDivider,
@@ -160,6 +168,25 @@ function saveIdSet(key, set) {
   }
 }
 
+function readSavedAiConfig() {
+  try {
+    const raw = localStorage.getItem(PREF_KEYS.aiConfig);
+    return normalizeAiConfig(raw ? JSON.parse(raw) : DEFAULT_AI_CONFIG);
+  } catch {
+    return normalizeAiConfig(DEFAULT_AI_CONFIG);
+  }
+}
+
+function saveAiConfig(cfg) {
+  const norm = normalizeAiConfig(cfg);
+  try {
+    localStorage.setItem(PREF_KEYS.aiConfig, JSON.stringify(norm));
+  } catch {
+    // Ignore storage errors in restricted browsing contexts
+  }
+  return norm;
+}
+
 const state = {
   ready: false,
   view: 'collection', // 'collection' | 'detail' | 'editor' | 'import' | 'reference' | 'dividers' | 'sync'
@@ -168,6 +195,13 @@ const state = {
   detailLayout: readSavedPref(PREF_KEYS.detailLayout, ['binder', 'classic'], 'binder'),
   printMethodsMode: readSavedPref(PREF_KEYS.printMethodsMode, ['selected', 'all'], 'selected'),
   unitMode: readSavedPref(PREF_KEYS.unitMode, ['original', 'metric', 'us-weight'], 'original'),
+  aiConfig: readSavedAiConfig(),
+  aiOllamaModels: [],
+  aiTestStatus: null,
+  isTestingAi: false,
+  aiBusyNoteId: '',
+  isAiSummarizing: false,
+  isAiCleaning: false,
   recipes: [],
   dividers: [],
   dividersUpdatedMs: 0,
@@ -439,6 +473,8 @@ function renderMainContent() {
       pasteText: state.pasteText,
       saveImmediately: state.importSaveImmediately,
       isDragOver: state.isDragOver,
+      aiConfig: state.aiConfig,
+      isAiCleaning: state.isAiCleaning,
     });
   }
 
@@ -492,6 +528,9 @@ function renderMainContent() {
       expandedTranscripts: state.notesExpandedTranscripts,
       isFetchingTranscript: state.isFetchingTranscript,
       transcriptError: state.transcriptError,
+      aiConfig: state.aiConfig,
+      aiBusyNoteId: state.aiBusyNoteId,
+      isAiSummarizing: state.isAiSummarizing,
     });
   }
 
@@ -530,6 +569,10 @@ function renderMainContent() {
       syncSnapshot: state.syncSnapshot,
       recipes: state.recipes,
       dividers: state.dividers,
+      aiConfig: state.aiConfig,
+      aiOllamaModels: state.aiOllamaModels,
+      aiTestStatus: state.aiTestStatus,
+      isTestingAi: state.isTestingAi,
     });
   }
 
@@ -1935,6 +1978,172 @@ async function handleAction(action, target) {
     return;
   }
 
+  if (action === 'open-ai-settings') {
+    state.view = 'sync';
+    render();
+    document.getElementById('ai-settings-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+
+  if (action === 'clear-gemini-key') {
+    state.aiConfig = saveAiConfig({ ...state.aiConfig, geminiApiKey: '' });
+    state.aiTestStatus = null;
+    setNotice('positive', 'Cleared saved Gemini API key from this browser.');
+    render();
+    return;
+  }
+
+  if (action === 'test-ai-connection') {
+    const form = document.getElementById('ai-settings-form');
+    if (form) {
+      const fd = new FormData(form);
+      state.aiConfig = saveAiConfig({
+        ...state.aiConfig,
+        provider: String(fd.get('provider') || state.aiConfig.provider),
+        ollamaModel: fd.get('ollamaModel') ?? state.aiConfig.ollamaModel,
+        ollamaUrl: fd.get('ollamaUrl') ?? state.aiConfig.ollamaUrl,
+        geminiModel: fd.get('geminiModel') ?? state.aiConfig.geminiModel,
+        geminiApiKey: fd.get('geminiApiKey') ?? state.aiConfig.geminiApiKey,
+      });
+    }
+    state.isTestingAi = true;
+    state.aiTestStatus = null;
+    render();
+    try {
+      const result = await testAiConnection(state.aiConfig);
+      if (Array.isArray(result.models) && result.models.length > 0) {
+        state.aiOllamaModels = result.models;
+      }
+      state.aiTestStatus = { ok: result.ok, message: result.message };
+    } catch (err) {
+      state.aiTestStatus = {
+        ok: false,
+        message: err?.message || 'AI connection test failed.',
+      };
+    } finally {
+      state.isTestingAi = false;
+      render();
+    }
+    return;
+  }
+
+  if (action === 'ai-transcript-to-recipe') {
+    const id = target.dataset.noteId || '';
+    const item = (state.notesData.items || []).find((n) => n.id === id && !n.deleted);
+    if (!item?.transcript) return;
+    if (!isAiReady(state.aiConfig)) {
+      state.view = 'sync';
+      setNotice('warning', 'Configure Local Ollama or Gemini API below to extract recipes from transcripts.');
+      render();
+      return;
+    }
+
+    const fallbackDividerId =
+      state.activeDividerId !== 'all' ? state.activeDividerId : state.dividers[0]?.id || 'weeknight';
+    state.aiBusyNoteId = id;
+    render();
+    try {
+      const draft = await extractRecipeWithAi({
+        text: item.transcript,
+        sourceLabel: 'cooking video transcript',
+        sourceUrl: item.url,
+        sourceTitle: item.title,
+        dividers: state.dividers,
+        fallbackDividerId,
+        config: state.aiConfig,
+      });
+      state.draftRecipe = draft;
+      state.editingRecipeId = null;
+      state.view = 'editor';
+      setNotice('positive', `Extracted "${draft.title}" from video transcript — review and save.`);
+    } catch (err) {
+      setNotice('danger', err?.message || 'AI transcript extraction failed.');
+    } finally {
+      state.aiBusyNoteId = '';
+      render();
+    }
+    return;
+  }
+
+  if (action === 'ai-summarize-note') {
+    const draft = readNoteEditorFormIntoDraft();
+    if (!draft) return;
+    if (!draft.transcript.trim()) {
+      setNotice('warning', 'Fetch or paste a video transcript first before summarizing.');
+      render();
+      return;
+    }
+    if (!isAiReady(state.aiConfig)) {
+      setNotice('warning', 'Configure Local Ollama or Gemini API in Sync & Backup first.');
+      render();
+      return;
+    }
+
+    state.draftNote = draft;
+    state.isAiSummarizing = true;
+    render();
+    try {
+      const summary = await summarizeNoteWithAi({
+        title: draft.title,
+        text: draft.transcript,
+        config: state.aiConfig,
+      });
+      const existingBody = state.draftNote.body.trim();
+      state.draftNote = {
+        ...state.draftNote,
+        body: existingBody ? `${existingBody}\n\nAI Summary:\n${summary}` : summary,
+      };
+      setNotice('positive', 'Added AI takeaways into Notes & Key Takeaways.');
+    } catch (err) {
+      setNotice('danger', err?.message || 'AI summary failed.');
+    } finally {
+      state.isAiSummarizing = false;
+      render();
+    }
+    return;
+  }
+
+  if (action === 'ai-convert-pasted-text') {
+    const pasteEl = document.getElementById('paste-recipe-textarea');
+    const text = String(pasteEl?.value ?? state.pasteText ?? '').trim();
+    state.pasteText = text;
+    if (!text) {
+      setNotice('warning', 'Paste some recipe text first before converting with AI.');
+      render();
+      return;
+    }
+    if (!isAiReady(state.aiConfig)) {
+      state.view = 'sync';
+      setNotice('warning', 'Configure Local Ollama or Gemini API below to use AI cleanup.');
+      render();
+      return;
+    }
+
+    const fallbackDividerId =
+      state.activeDividerId !== 'all' ? state.activeDividerId : state.dividers[0]?.id || 'weeknight';
+    state.isAiCleaning = true;
+    render();
+    try {
+      const draft = await extractRecipeWithAi({
+        text,
+        sourceLabel: 'pasted recipe text',
+        dividers: state.dividers,
+        fallbackDividerId,
+        config: state.aiConfig,
+      });
+      state.draftRecipe = draft;
+      state.editingRecipeId = null;
+      state.view = 'editor';
+      setNotice('positive', `Cleaned "${draft.title}" with AI — review and save.`);
+    } catch (err) {
+      setNotice('danger', err?.message || 'AI recipe cleanup failed.');
+    } finally {
+      state.isAiCleaning = false;
+      render();
+    }
+    return;
+  }
+
   if (action === 'add-editor-method') {
     const draft = readEditorFormIntoDraft();
     if (!draft) return;
@@ -2621,6 +2830,24 @@ document.addEventListener('change', async (event) => {
     return;
   }
 
+  if (target.id === 'ai-provider-select') {
+    const form = target.closest('form');
+    if (form) {
+      const fd = new FormData(form);
+      state.aiConfig = saveAiConfig({
+        ...state.aiConfig,
+        provider: target.value || 'off',
+        ollamaModel: fd.get('ollamaModel') ?? state.aiConfig.ollamaModel,
+        ollamaUrl: fd.get('ollamaUrl') ?? state.aiConfig.ollamaUrl,
+        geminiModel: fd.get('geminiModel') ?? state.aiConfig.geminiModel,
+        geminiApiKey: fd.get('geminiApiKey') ?? state.aiConfig.geminiApiKey,
+      });
+      state.aiTestStatus = null;
+      render();
+    }
+    return;
+  }
+
   if (target.dataset.action === 'toggle-matcher-staples') {
     state.matcherIncludeStaples = Boolean(target.checked);
     render();
@@ -3057,6 +3284,32 @@ document.addEventListener('submit', async (event) => {
       setNotice('danger', err?.message || 'Could not save note.');
       render();
     }
+    return;
+  }
+
+  if (formId === 'ai-settings-form') {
+    event.preventDefault();
+    const fd = new FormData(form);
+    state.aiConfig = saveAiConfig({
+      ...state.aiConfig,
+      provider: String(fd.get('provider') || 'off'),
+      ollamaModel: fd.get('ollamaModel') ?? state.aiConfig.ollamaModel,
+      ollamaUrl: fd.get('ollamaUrl') ?? state.aiConfig.ollamaUrl,
+      geminiModel: fd.get('geminiModel') ?? state.aiConfig.geminiModel,
+      geminiApiKey: fd.get('geminiApiKey') ?? state.aiConfig.geminiApiKey,
+    });
+    state.aiTestStatus = null;
+    setNotice(
+      'positive',
+      state.aiConfig.provider === 'off'
+        ? 'AI Assistant turned Off.'
+        : `Saved AI settings (${
+            state.aiConfig.provider === 'ollama'
+              ? `Local Ollama · ${state.aiConfig.ollamaModel}`
+              : `Gemini · ${state.aiConfig.geminiModel}`
+          }).`
+    );
+    render();
     return;
   }
 

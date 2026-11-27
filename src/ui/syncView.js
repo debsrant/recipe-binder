@@ -1,7 +1,151 @@
 import { IS_TEST_STAGE, SITE_STAGE } from '../config.js';
+import { AI_PROVIDERS, GEMINI_MODELS, normalizeAiConfig } from '../lib/ai.js';
 import { escapeHtml } from './helpers.js';
 
-export function renderSyncView({ syncSnapshot, recipes, dividers }) {
+function renderAiSettingsCard({
+  aiConfig,
+  aiOllamaModels = [],
+  aiTestStatus = null,
+  isTestingAi = false,
+}) {
+  const cfg = normalizeAiConfig(aiConfig);
+  const providerOptions = AI_PROVIDERS.map(
+    (p) =>
+      `<option value="${escapeHtml(p.id)}" ${cfg.provider === p.id ? 'selected' : ''}>${escapeHtml(
+        p.label
+      )}</option>`
+  ).join('');
+
+  const geminiModelOptions = GEMINI_MODELS.map(
+    (m) =>
+      `<option value="${escapeHtml(m.id)}" ${
+        cfg.geminiModel === m.id ? 'selected' : ''
+      }>${escapeHtml(m.label)}</option>`
+  ).join('');
+
+  let providerFieldsHtml = `
+    <p class="muted" style="margin: 8px 0 0;">
+      AI features are off. Choose <strong>Local Ollama</strong> (free &amp; private on your PC / home Wi-Fi) or <strong>Gemini API (BYOK)</strong> (works anywhere including GitHub Pages).
+    </p>
+  `;
+
+  if (cfg.provider === 'ollama') {
+    const datalistHtml =
+      aiOllamaModels.length > 0
+        ? `<datalist id="ollama-installed-models">
+            ${aiOllamaModels.map((m) => `<option value="${escapeHtml(m)}"></option>`).join('')}
+          </datalist>`
+        : '';
+    providerFieldsHtml = `
+      <div class="callout-box callout-positive" style="margin-top: 10px;">
+        <strong>How Local Ollama works on PC &amp; Kitchen Tablets:</strong>
+        Run <code>ollama serve</code> and pull a model (e.g. <code>ollama pull llama3.2</code>).
+        When using <code>npm.cmd run dev</code> or <code>npm.cmd run dev:lan</code> / <code>preview:lan</code>, Vite proxies requests automatically so your phone/tablet on the same Wi-Fi uses your PC's Ollama without exposing Ollama to the internet.
+      </div>
+      ${datalistHtml}
+      <div class="form-grid" style="margin-top: 10px;">
+        <div class="form-field">
+          <label for="ai-ollama-model">Ollama Model</label>
+          <input
+            id="ai-ollama-model"
+            name="ollamaModel"
+            type="text"
+            ${aiOllamaModels.length > 0 ? 'list="ollama-installed-models"' : ''}
+            value="${escapeHtml(cfg.ollamaModel)}"
+            placeholder="e.g., llama3.2, qwen2.5, mistral"
+          />
+        </div>
+        <div class="form-field">
+          <label for="ai-ollama-url">Custom Ollama URL (optional — leave blank for built-in proxy)</label>
+          <input
+            id="ai-ollama-url"
+            name="ollamaUrl"
+            type="url"
+            value="${escapeHtml(cfg.ollamaUrl)}"
+            placeholder="Leave blank to use ./api/ai/ollama (recommended)"
+          />
+        </div>
+      </div>
+    `;
+  } else if (cfg.provider === 'gemini') {
+    providerFieldsHtml = `
+      <div class="callout-box callout-warning" style="margin-top: 10px;">
+        <strong>Browser-Only Key Storage:</strong> Your Gemini API key is saved <strong>only in this browser's <code>localStorage</code></strong>. It is never synced to Firebase or included in JSON backups.
+      </div>
+      <div class="form-grid" style="margin-top: 10px;">
+        <div class="form-field">
+          <label for="ai-gemini-model">Gemini Model</label>
+          <select id="ai-gemini-model" name="geminiModel">
+            ${geminiModelOptions}
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="ai-gemini-key">Gemini API Key (AIza...)</label>
+          <div class="ai-key-row">
+            <input
+              id="ai-gemini-key"
+              name="geminiApiKey"
+              type="password"
+              autocomplete="off"
+              value="${escapeHtml(cfg.geminiApiKey)}"
+              placeholder="Paste your Google AI Studio API key..."
+            />
+            ${
+              cfg.geminiApiKey
+                ? `<button type="button" class="btn btn-sm btn-outline" data-action="clear-gemini-key">Clear Key</button>`
+                : ''
+            }
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  const statusHtml = aiTestStatus?.message
+    ? `<div class="callout-box ${
+        aiTestStatus.ok ? 'callout-positive' : 'callout-danger'
+      }" style="margin-top: 10px; margin-bottom: 0;">${escapeHtml(aiTestStatus.message)}</div>`
+    : '';
+
+  return `
+    <div id="ai-settings-card" class="panel-card">
+      <h2>Optional AI Kitchen Assistant (Ollama or Gemini API)</h2>
+      <p class="muted">
+        Power transcript-to-recipe extraction, video note summaries, and messy pasted-text cleanup. Everything in Recipe Binder still works 100% offline when AI is Off.
+      </p>
+      <form id="ai-settings-form">
+        <div class="form-field">
+          <label for="ai-provider-select">AI Backend Provider</label>
+          <select id="ai-provider-select" name="provider">
+            ${providerOptions}
+          </select>
+        </div>
+        ${providerFieldsHtml}
+        <div class="btn-row" style="margin-top: 12px;">
+          <button type="submit" class="btn btn-primary">Save AI Settings</button>
+          ${
+            cfg.provider !== 'off'
+              ? `<button type="button" class="btn btn-outline" data-action="test-ai-connection" ${
+                  isTestingAi ? 'disabled' : ''
+                }>${isTestingAi ? 'Testing…' : 'Test Connection'}</button>`
+              : ''
+          }
+        </div>
+      </form>
+      ${statusHtml}
+    </div>
+  `;
+}
+
+export function renderSyncView({
+  syncSnapshot,
+  recipes,
+  dividers,
+  aiConfig = null,
+  aiOllamaModels = [],
+  aiTestStatus = null,
+  isTestingAi = false,
+}) {
   const activeCount = (recipes || []).filter((r) => r && !r.deleted).length;
   const dividerCount = (dividers || []).length;
 
@@ -97,6 +241,8 @@ export function renderSyncView({ syncSnapshot, recipes, dividers }) {
 
   return `
     <section class="sync-shell">
+      ${renderAiSettingsCard({ aiConfig, aiOllamaModels, aiTestStatus, isTestingAi })}
+
       <div class="panel-card">
         <h2>Cross-Device Cloud Sync (Optional Firebase)</h2>
         ${cloudBodyHtml}
