@@ -1,29 +1,9 @@
 import { getRecipeMethods } from './collection.js';
 import { scaleIngredientLine } from './scaling.js';
 
-const STORAGE_LOCATION_SET = new Set(['freezer', 'fridge', 'canning-shelf']);
-
 function cleanText(value, fallback = '') {
   const str = String(value ?? '').trim();
   return str || fallback;
-}
-
-function normalizeDateIso(value, fallback = '') {
-  const raw = String(value ?? '').trim();
-  if (!raw) return fallback;
-  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
-  return match ? match[1] : fallback;
-}
-
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addDaysIso(isoDate, days) {
-  const base = normalizeDateIso(isoDate, todayIsoDate());
-  const ms = Date.parse(`${base}T00:00:00Z`);
-  if (!Number.isFinite(ms)) return '';
-  return new Date(ms + days * 86400000).toISOString().slice(0, 10);
 }
 
 /**
@@ -59,37 +39,6 @@ export function normalizeBatchTemplate(item) {
     batchYield: cleanText(item?.batchYield),
     prepTips: cleanText(item?.prepTips),
     derivatives,
-    isCustom: Boolean(item?.isCustom),
-    updatedMs: Number.isFinite(updatedNum) && updatedNum > 0 ? updatedNum : 1700000000000,
-    deleted: Boolean(item?.deleted),
-  };
-}
-
-/**
- * Normalizes a single Freezer or Fridge leftover inventory item.
- */
-export function normalizeFreezerItem(item) {
-  const storedDate = normalizeDateIso(item?.storedDate, todayIsoDate());
-  const rawLocation = cleanText(item?.storageLocation, 'freezer').toLowerCase();
-  const storageLocation = STORAGE_LOCATION_SET.has(rawLocation) ? rawLocation : 'freezer';
-  const defaultDays = storageLocation === 'fridge' ? 4 : storageLocation === 'canning-shelf' ? 365 : 90;
-  const defaultBestBy = addDaysIso(storedDate, defaultDays);
-  const hasPortions =
-    item?.portions !== '' && item?.portions !== null && item?.portions !== undefined;
-  const rawPortions = hasPortions ? Number(item.portions) : NaN;
-  const portions = Number.isFinite(rawPortions) && rawPortions >= 0 ? Number(rawPortions) : 1;
-  const updatedNum = Number(item?.updatedMs);
-
-  return {
-    id: cleanText(item?.id) || `freez-${Date.now()}`,
-    recipeId: cleanText(item?.recipeId),
-    title: cleanText(item?.title, 'Stored Portion'),
-    storageLocation,
-    portions,
-    servingSize: cleanText(item?.servingSize, '1 serving'),
-    storedDate,
-    bestByDate: normalizeDateIso(item?.bestByDate, defaultBestBy),
-    reheatNotes: cleanText(item?.reheatNotes),
     isCustom: Boolean(item?.isCustom),
     updatedMs: Number.isFinite(updatedNum) && updatedNum > 0 ? updatedNum : 1700000000000,
     deleted: Boolean(item?.deleted),
@@ -138,7 +87,6 @@ export function getDefaultMealPrepData() {
         deleted: false,
       }),
     ],
-    freezerItems: [],
   };
 }
 
@@ -172,11 +120,8 @@ export function normalizeMealPrepData(input) {
   const templates = hasTemplates
     ? mergeItemArrays(defaults.templates, input.templates, [], normalizeBatchTemplate)
     : defaults.templates;
-  const freezerItems = Array.isArray(input?.freezerItems)
-    ? input.freezerItems.map(normalizeFreezerItem)
-    : [];
 
-  return { templates, freezerItems };
+  return { templates };
 }
 
 /**
@@ -190,12 +135,6 @@ export function mergeMealPrepData(localData, remoteData) {
       localData?.templates,
       remoteData?.templates,
       normalizeBatchTemplate
-    ),
-    freezerItems: mergeItemArrays(
-      [],
-      localData?.freezerItems,
-      remoteData?.freezerItems,
-      normalizeFreezerItem
     ),
   };
 }
@@ -235,63 +174,6 @@ export function deleteMealPrepItem(list, id) {
         }
       : item
   );
-}
-
-/**
- * Adjusts remaining portions on a freezer/fridge inventory item safely at >= 0.
- */
-export function adjustFreezerPortions(item, delta) {
-  const normalized = normalizeFreezerItem(item);
-  const change = Number(delta);
-  const nextPortions = Number.isFinite(change)
-    ? Math.max(0, Math.round((normalized.portions + change) * 100) / 100)
-    : normalized.portions;
-
-  return {
-    ...normalized,
-    portions: nextPortions,
-    updatedMs: Date.now(),
-  };
-}
-
-/**
- * Computes storage freshness status for a freezer or fridge entry.
- * Returns: 'empty' | 'expired' | 'use-soon' | 'fresh'
- */
-export function getFreezerItemStatus(item, referenceDate = todayIsoDate()) {
-  const norm = normalizeFreezerItem(item);
-  if (norm.portions <= 0) {
-    return { status: 'empty', label: 'Empty', daysRemaining: 0 };
-  }
-  const refIso = normalizeDateIso(referenceDate, todayIsoDate());
-  const bestIso = normalizeDateIso(norm.bestByDate);
-  if (!bestIso) {
-    return { status: 'fresh', label: 'Fresh', daysRemaining: null };
-  }
-  const refMs = Date.parse(`${refIso}T00:00:00Z`);
-  const bestMs = Date.parse(`${bestIso}T00:00:00Z`);
-  const daysRemaining = Math.round((bestMs - refMs) / 86400000);
-
-  if (daysRemaining < 0) {
-    return {
-      status: 'expired',
-      label: `Past Best-By (${Math.abs(daysRemaining)}d)`,
-      daysRemaining,
-    };
-  }
-  const threshold = norm.storageLocation === 'fridge' ? 1 : 14;
-  if (daysRemaining <= threshold) {
-    return {
-      status: 'use-soon',
-      label: daysRemaining === 0 ? 'Use Today' : `Use Soon (${daysRemaining}d)`,
-      daysRemaining,
-    };
-  }
-  return {
-    status: 'fresh',
-    label: `Fresh (${daysRemaining}d left)`,
-    daysRemaining,
-  };
 }
 
 const PREHEAT_RE = /\b(preheat|heat oven|heat the oven|set oven|broiler)\b/i;

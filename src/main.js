@@ -36,21 +36,20 @@ import {
 } from './lib/ai.js';
 import {
   getRecipeMethods,
+  hasCanningSpecs,
   mergeCollectionSnapshots,
   normalizeCanningSpecs,
   normalizeDivider,
   normalizeRecipe,
   parseTagsInput,
 } from './lib/collection.js';
-import { getMixRecipes } from './lib/subRecipes.js';
+import { getMixRecipes, isMixRecipe } from './lib/subRecipes.js';
 import { recipeToFilename, recipeToMarkdown, slugifyFilename } from './lib/markdown.js';
 import {
-  adjustFreezerPortions,
   deleteMealPrepItem,
   getDefaultMealPrepData,
   normalizeBatchTemplate,
   normalizeDerivative,
-  normalizeFreezerItem,
   upsertMealPrepItem,
 } from './lib/mealPrep.js';
 import {
@@ -64,9 +63,11 @@ import {
   upsertNoteItem,
 } from './lib/notes.js';
 import {
+  adjustInventoryPortions,
   cyclePantryStatus,
   deletePantryItem,
   extractCoreIngredientName,
+  getDefaultBestByDays,
   getDefaultPantryData,
   normalizeIngredientKey,
   normalizePantryItem,
@@ -248,17 +249,15 @@ const state = {
   activeMixRecipeId: null,
   mixModalScale: 1,
   referenceTab: 'converter',
-  mealPrepTab: 'freezer',
-  freezerFilter: 'all',
-  freezerQuery: '',
-  editingFreezerId: null,
-  prefillFreezer: null,
+  mealPrepTab: 'timeline',
   editingTemplateId: null,
   timelineSelections: {},
   checkedTimelineSteps: new Set(),
   pantryTab: 'inventory',
   pantryCategory: 'all',
   pantryStatusFilter: 'all',
+  pantryTypeFilter: 'all',
+  pantryLocationFilter: 'all',
   pantryQuery: '',
   editingPantryId: null,
   matcherSelectedNames: new Set(),
@@ -431,7 +430,7 @@ function renderNavBar() {
         <button type="button" class="nav-tab ${collectionActive ? 'is-active' : ''}" data-action="nav-view" data-view="collection">Collection</button>
         <button type="button" class="nav-tab ${state.view === 'import' ? 'is-active' : ''}" data-action="nav-view" data-view="import">Import</button>
         <button type="button" class="nav-tab ${state.view === 'mealprep' ? 'is-active' : ''}" data-action="nav-view" data-view="mealprep">Meal Prep</button>
-        <button type="button" class="nav-tab ${state.view === 'pantry' ? 'is-active' : ''}" data-action="nav-view" data-view="pantry">Pantry</button>
+        <button type="button" class="nav-tab ${state.view === 'pantry' ? 'is-active' : ''}" data-action="nav-view" data-view="pantry">Inventory</button>
         <button type="button" class="nav-tab ${state.view === 'notes' ? 'is-active' : ''}" data-action="nav-view" data-view="notes">Notes</button>
         <button type="button" class="nav-tab ${state.view === 'reference' ? 'is-active' : ''}" data-action="nav-view" data-view="reference">Reference</button>
         <button type="button" class="nav-tab ${state.view === 'dividers' ? 'is-active' : ''}" data-action="nav-view" data-view="dividers">Dividers</button>
@@ -527,10 +526,6 @@ function renderMainContent() {
       activeTab: state.mealPrepTab,
       mealPrepData: state.mealPrepData,
       recipes: state.recipes,
-      freezerFilter: state.freezerFilter,
-      freezerQuery: state.freezerQuery,
-      editingFreezerId: state.editingFreezerId,
-      prefillFreezer: state.prefillFreezer,
       editingTemplateId: state.editingTemplateId,
       timelineSelections: state.timelineSelections,
       checkedTimelineSteps: state.checkedTimelineSteps,
@@ -545,6 +540,8 @@ function renderMainContent() {
       dividers: state.dividers,
       pantryCategory: state.pantryCategory,
       pantryStatusFilter: state.pantryStatusFilter,
+      pantryTypeFilter: state.pantryTypeFilter,
+      pantryLocationFilter: state.pantryLocationFilter,
       pantryQuery: state.pantryQuery,
       editingPantryId: state.editingPantryId,
       matcherSelectedNames: state.matcherSelectedNames,
@@ -638,7 +635,6 @@ function renderMainContent() {
 
 const PRESERVED_SEARCH_IDS = new Set([
   'recipe-search-input',
-  'mealprep-freezer-search',
   'pantry-search-input',
   'matcher-ingredient-search',
   'notes-search-input',
@@ -1612,61 +1608,12 @@ async function handleAction(action, target) {
   }
 
   if (action === 'set-mealprep-tab') {
-    state.mealPrepTab = target.dataset.tab || 'freezer';
+    state.mealPrepTab = target.dataset.tab === 'templates' ? 'templates' : 'timeline';
     render();
     return;
   }
 
-  if (action === 'set-freezer-filter') {
-    state.freezerFilter = target.dataset.filter || 'all';
-    render();
-    return;
-  }
-
-  if (action === 'adjust-freezer-portions') {
-    const id = target.dataset.itemId;
-    const delta = Number(target.dataset.delta || 0);
-    const items = state.mealPrepData.freezerItems || [];
-    const idx = items.findIndex((i) => i.id === id);
-    if (idx < 0) return;
-    const updated = adjustFreezerPortions(items[idx], delta);
-    const nextItems = [...items];
-    nextItems[idx] = updated;
-    await persistMealPrepPatch(
-      { freezerItems: nextItems },
-      updated.portions === 0 ? `Marked "${updated.title}" empty (0 portions left).` : ''
-    );
-    return;
-  }
-
-  if (action === 'edit-freezer-item') {
-    state.editingFreezerId = target.dataset.itemId || null;
-    state.prefillFreezer = null;
-    state.mealPrepTab = 'freezer';
-    render();
-    return;
-  }
-
-  if (action === 'cancel-freezer-edit') {
-    state.editingFreezerId = null;
-    state.prefillFreezer = null;
-    render();
-    return;
-  }
-
-  if (action === 'delete-freezer-item') {
-    const id = target.dataset.itemId;
-    const item = (state.mealPrepData.freezerItems || []).find((i) => i.id === id);
-    if (!item || !window.confirm(`Remove "${item.title}" from freezer/leftover inventory?`)) return;
-    const nextItems = deleteMealPrepItem(state.mealPrepData.freezerItems || [], id);
-    if (state.editingFreezerId === id) {
-      state.editingFreezerId = null;
-    }
-    await persistMealPrepPatch({ freezerItems: nextItems }, `Removed "${item.title}".`);
-    return;
-  }
-
-  if (action === 'send-recipe-to-freezer') {
+  if (action === 'send-recipe-to-inventory') {
     const id = target.dataset.recipeId || state.selectedRecipeId;
     const recipe = state.recipes.find((r) => r.id === id && !r.deleted);
     if (!recipe) return;
@@ -1676,33 +1623,42 @@ async function handleAction(action, target) {
     if (state.view === 'detail') {
       resetCookSession(true);
     }
+
+    const isCanned = hasCanningSpecs(recipe.canning);
+    const isMix = isMixRecipe(recipe, state.dividers);
+    const itemType = isCanned || isMix ? 'mix-canned' : 'cooked-meal';
+    const location = isCanned ? 'canning-shelf' : isMix ? 'pantry' : 'freezer';
+    const category = isCanned ? 'canned-grains' : isMix ? 'spices-oils' : 'other';
+    const days = getDefaultBestByDays(location);
     const today = new Date().toISOString().slice(0, 10);
-    const bestBy = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
-    const newItem = normalizeFreezerItem({
-      id: generateId('frz'),
+    const bestBy = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+
+    const newItem = normalizePantryItem({
+      id: generateId('pan'),
       recipeId: recipe.id,
-      title: recipe.title,
-      storageLocation: 'freezer',
+      name: recipe.title,
+      itemType,
+      category,
+      location,
       portions,
-      servingSize: recipe.servingSize || '1 serving',
+      quantity: recipe.servingSize || '1 serving',
+      status: portions <= 1 ? 'low' : 'in-stock',
       storedDate: today,
       bestByDate: bestBy,
-      reheatNotes: recipe.reheatNotes || '',
+      reheatNotes: recipe.reheatNotes || recipe.storageNotes || '',
     });
-    const nextItems = upsertMealPrepItem(
-      state.mealPrepData.freezerItems || [],
-      newItem,
-      normalizeFreezerItem
-    );
-    state.freezerFilter = 'all';
-    state.freezerQuery = '';
-    state.prefillFreezer = null;
-    state.editingFreezerId = newItem.id;
-    state.view = 'mealprep';
-    state.mealPrepTab = 'freezer';
-    await persistMealPrepPatch(
-      { freezerItems: nextItems },
-      `Sent "${recipe.title}" (${portions} portion${portions === 1 ? '' : 's'}) to Freezer Inventory — edit portions or reheating notes on the right if needed.`
+    const nextItems = upsertPantryItem(state.pantryData.items || [], newItem);
+    state.pantryTypeFilter = 'all';
+    state.pantryLocationFilter = 'all';
+    state.pantryStatusFilter = 'all';
+    state.pantryCategory = 'all';
+    state.pantryQuery = '';
+    state.editingPantryId = newItem.id;
+    state.view = 'pantry';
+    state.pantryTab = 'inventory';
+    await persistPantryPatch(
+      { items: nextItems },
+      `Logged "${recipe.title}" (${portions} portion${portions === 1 ? '' : 's'}) to Kitchen Inventory — edit count, location, or reheat notes on the right if needed.`
     );
     window.scrollTo({ top: 0, behavior: 'smooth' });
     return;
@@ -1796,7 +1752,7 @@ async function handleAction(action, target) {
     if (state.matcherSelectedNames.size === 0) {
       const next = new Set();
       for (const item of state.pantryData.items || []) {
-        if (!item.deleted && item.status !== 'out') {
+        if (!item.deleted && item.status !== 'out' && item.itemType !== 'cooked-meal') {
           next.add(item.name);
         }
       }
@@ -1806,9 +1762,52 @@ async function handleAction(action, target) {
     return;
   }
 
+  if (action === 'set-pantry-type-filter') {
+    state.pantryTypeFilter = target.dataset.type || 'all';
+    render();
+    return;
+  }
+
   if (action === 'set-pantry-status-filter') {
     state.pantryStatusFilter = target.dataset.filter || 'all';
     render();
+    return;
+  }
+
+  if (action === 'adjust-pantry-portions') {
+    const id = target.dataset.itemId;
+    const delta = Number(target.dataset.delta || 0);
+    const items = state.pantryData.items || [];
+    const idx = items.findIndex((i) => i.id === id);
+    if (idx < 0) return;
+    const updated = adjustInventoryPortions(items[idx], delta);
+    const nextItems = [...items];
+    nextItems[idx] = updated;
+    const notice =
+      updated.portions === 0
+        ? `Marked "${updated.name}" Out / Restock (0 left).`
+        : updated.status === 'low'
+        ? `"${updated.name}" is now Running Low (${updated.portions} left).`
+        : '';
+    await persistPantryPatch({ items: nextItems }, notice);
+    return;
+  }
+
+  if (action === 'auto-pantry-bestby') {
+    const form = target.closest('form');
+    if (!form) return;
+    const loc = form.querySelector('#pantry-location')?.value || 'pantry';
+    const storedInput = form.querySelector('#pantry-stored-date');
+    const bestByInput = form.querySelector('#pantry-bestby-date');
+    const today = new Date().toISOString().slice(0, 10);
+    if (storedInput && !storedInput.value) {
+      storedInput.value = today;
+    }
+    const baseMs = Date.parse(`${storedInput?.value || today}T00:00:00Z`);
+    if (bestByInput && Number.isFinite(baseMs)) {
+      const days = getDefaultBestByDays(loc);
+      bestByInput.value = new Date(baseMs + days * 86400000).toISOString().slice(0, 10);
+    }
     return;
   }
 
@@ -1913,7 +1912,7 @@ async function handleAction(action, target) {
   if (action === 'matcher-use-pantry') {
     const next = new Set();
     for (const item of state.pantryData.items || []) {
-      if (!item.deleted && item.status !== 'out') {
+      if (!item.deleted && item.status !== 'out' && item.itemType !== 'cooked-meal') {
         next.add(item.name);
       }
     }
@@ -3102,11 +3101,6 @@ document.addEventListener('input', (event) => {
     render();
     return;
   }
-  if (target.id === 'mealprep-freezer-search') {
-    state.freezerQuery = target.value;
-    render();
-    return;
-  }
   if (target.id === 'pantry-search-input') {
     state.pantryQuery = target.value;
     render();
@@ -3309,30 +3303,57 @@ document.addEventListener('change', async (event) => {
     return;
   }
 
-  if (target.id === 'freezer-recipe-select') {
+  if (target.id === 'pantry-location-filter-select') {
+    state.pantryLocationFilter = target.value || 'all';
+    render();
+    return;
+  }
+
+  if (target.id === 'pantry-recipe-select') {
     const recipe = state.recipes.find((r) => r.id === target.value && !r.deleted);
     if (!recipe) return;
     const form = target.closest('form');
     if (!form) return;
-    const titleInput = form.querySelector('#freezer-title');
-    const portionsInput = form.querySelector('#freezer-portions');
-    const sizeInput = form.querySelector('#freezer-serving-size');
-    if (titleInput) titleInput.value = recipe.title;
+    const isCanned = hasCanningSpecs(recipe.canning);
+    const isMix = isMixRecipe(recipe, state.dividers);
+    const nextType = isCanned || isMix ? 'mix-canned' : 'cooked-meal';
+    const nextLoc = isCanned ? 'canning-shelf' : isMix ? 'pantry' : 'freezer';
+    const today = new Date().toISOString().slice(0, 10);
+    const bestBy = new Date(Date.now() + getDefaultBestByDays(nextLoc) * 86400000)
+      .toISOString()
+      .slice(0, 10);
+
+    const typeInput = form.querySelector('#pantry-item-type');
+    const locInput = form.querySelector('#pantry-location');
+    const nameInput = form.querySelector('#pantry-name');
+    const portionsInput = form.querySelector('#pantry-portions');
+    const qtyInput = form.querySelector('#pantry-quantity');
+    const storedInput = form.querySelector('#pantry-stored-date');
+    const bestByInput = form.querySelector('#pantry-bestby-date');
+    const reheatInput = form.querySelector('#pantry-reheat-notes');
+
+    if (typeInput) typeInput.value = nextType;
+    if (locInput) locInput.value = nextLoc;
+    if (nameInput) nameInput.value = recipe.title;
     if (portionsInput) portionsInput.value = String(recipe.servings || 4);
-    if (sizeInput) sizeInput.value = recipe.servingSize || '1 serving';
+    if (qtyInput) qtyInput.value = recipe.servingSize || '1 serving';
+    if (storedInput && !storedInput.value) storedInput.value = today;
+    if (bestByInput) bestByInput.value = bestBy;
+    if (reheatInput) reheatInput.value = recipe.reheatNotes || recipe.storageNotes || '';
     return;
   }
 
-  if (target.id === 'freezer-location') {
+  if (target.id === 'pantry-location') {
     const form = target.closest('form');
     if (!form) return;
-    const storedInput = form.querySelector('#freezer-stored-date');
-    const bestByInput = form.querySelector('#freezer-bestby-date');
-    const baseMs = Date.parse(`${storedInput?.value || new Date().toISOString().slice(0, 10)}T00:00:00Z`);
-    if (bestByInput && Number.isFinite(baseMs)) {
-      const days =
-        target.value === 'fridge' ? 4 : target.value === 'canning-shelf' ? 365 : 90;
-      bestByInput.value = new Date(baseMs + days * 86400000).toISOString().slice(0, 10);
+    const storedInput = form.querySelector('#pantry-stored-date');
+    const bestByInput = form.querySelector('#pantry-bestby-date');
+    if (storedInput?.value && bestByInput) {
+      const baseMs = Date.parse(`${storedInput.value}T00:00:00Z`);
+      if (Number.isFinite(baseMs)) {
+        const days = getDefaultBestByDays(target.value);
+        bestByInput.value = new Date(baseMs + days * 86400000).toISOString().slice(0, 10);
+      }
     }
     return;
   }
@@ -3614,51 +3635,6 @@ document.addEventListener('submit', async (event) => {
     return;
   }
 
-  if (formId === 'mealprep-freezer-form') {
-    event.preventDefault();
-    try {
-      const fd = new FormData(form);
-      const existingId = String(form.dataset.freezerId || '').trim();
-      const title = String(fd.get('title') || '').trim();
-      if (!title) {
-        setNotice('warning', 'Please enter a dish name before saving to inventory.');
-        render();
-        return;
-      }
-      const candidate = normalizeFreezerItem({
-        id: existingId || generateId('frz'),
-        recipeId: fd.get('recipeId'),
-        title,
-        storageLocation: fd.get('storageLocation'),
-        portions: fd.get('portions'),
-        servingSize: fd.get('servingSize'),
-        storedDate: fd.get('storedDate'),
-        bestByDate: fd.get('bestByDate'),
-        reheatNotes: fd.get('reheatNotes'),
-      });
-      const nextItems = upsertMealPrepItem(
-        state.mealPrepData.freezerItems || [],
-        candidate,
-        normalizeFreezerItem
-      );
-      if (!existingId) {
-        state.freezerFilter = 'all';
-        state.freezerQuery = '';
-      }
-      state.editingFreezerId = null;
-      state.prefillFreezer = null;
-      await persistMealPrepPatch(
-        { freezerItems: nextItems },
-        `Saved "${candidate.title}" (${candidate.portions} portions) to inventory.`
-      );
-    } catch (err) {
-      console.error('Freezer form save failed:', err);
-      setNotice('danger', err?.message || 'Could not save freezer entry.');
-      render();
-    }
-    return;
-  }
-
   if (formId === 'mealprep-template-form') {
     event.preventDefault();
     try {
@@ -3715,22 +3691,30 @@ document.addEventListener('submit', async (event) => {
       const existingId = String(form.dataset.pantryId || '').trim();
       const name = String(fd.get('name') || '').trim();
       if (!name) {
-        setNotice('warning', 'Please enter an ingredient name.');
+        setNotice('warning', 'Please enter an item name.');
         render();
         return;
       }
       const candidate = normalizePantryItem({
         id: existingId || generateId('pan'),
         name,
+        itemType: fd.get('itemType'),
+        recipeId: fd.get('recipeId'),
         category: fd.get('category'),
         location: fd.get('location'),
+        portions: fd.get('portions'),
         quantity: fd.get('quantity'),
         status: fd.get('status'),
+        storedDate: fd.get('storedDate'),
+        bestByDate: fd.get('bestByDate'),
+        reheatNotes: fd.get('reheatNotes'),
         alwaysStocked: fd.get('alwaysStocked') === 'on',
         notes: fd.get('notes'),
       });
       const nextItems = upsertPantryItem(state.pantryData.items || [], candidate);
       if (!existingId) {
+        state.pantryTypeFilter = 'all';
+        state.pantryLocationFilter = 'all';
         state.pantryStatusFilter = 'all';
         state.pantryCategory = 'all';
         state.pantryQuery = '';
@@ -3738,11 +3722,11 @@ document.addEventListener('submit', async (event) => {
       state.editingPantryId = null;
       await persistPantryPatch(
         { items: nextItems },
-        `Saved "${candidate.name}" to pantry.`
+        `Saved "${candidate.name}" to Kitchen Inventory.`
       );
     } catch (err) {
-      console.error('Pantry form save failed:', err);
-      setNotice('danger', err?.message || 'Could not save pantry item.');
+      console.error('Inventory form save failed:', err);
+      setNotice('danger', err?.message || 'Could not save inventory item.');
       render();
     }
     return;

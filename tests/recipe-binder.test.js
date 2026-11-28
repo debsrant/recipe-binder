@@ -95,24 +95,25 @@ import {
   getQuickEquivalents,
 } from '../src/lib/units.js';
 import {
-  adjustFreezerPortions,
   buildMergedPrepTimeline,
   deleteMealPrepItem,
   getDefaultMealPrepData,
-  getFreezerItemStatus,
   mergeMealPrepData,
   normalizeBatchTemplate,
-  normalizeFreezerItem,
   normalizeMealPrepData,
   upsertMealPrepItem,
 } from '../src/lib/mealPrep.js';
 import {
+  PANTRY_ITEM_TYPES,
   PANTRY_LOCATIONS,
+  adjustInventoryPortions,
   collectBinderIngredients,
   cyclePantryStatus,
   deletePantryItem,
   extractCoreIngredientName,
+  getDefaultBestByDays,
   getDefaultPantryData,
+  getInventoryFreshness,
   matchRecipesByIngredients,
   mergePantryData,
   normalizeIngredientKey,
@@ -1078,64 +1079,34 @@ test('servingSize persists across normalizeRecipe, search, and Markdown round-tr
   assert.equal(parsed.servingSize, '1 1/2 cups');
 });
 
-test('mealPrep freezer status, portions, CRUD, and snapshot merge work offline & synced', () => {
+test('mealPrep templates CRUD and snapshot merge work offline & synced', () => {
   const defaults = getDefaultMealPrepData();
   assert.ok(defaults.templates.some((t) => t.id === 'batch-sunday-chicken'));
 
-  const freshFreezer = normalizeFreezerItem({
-    id: 'fr-1',
-    title: 'Chili',
-    storageLocation: 'freezer',
-    portions: 4,
-    servingSize: '1 1/2 cups',
-    storedDate: '2026-11-01',
-    bestByDate: '2027-01-30',
-  });
-  assert.equal(getFreezerItemStatus(freshFreezer, '2026-11-26').status, 'fresh');
-
-  const fridgeSoon = normalizeFreezerItem({
-    id: 'fr-2',
-    title: 'Chicken Salad',
-    storageLocation: 'fridge',
-    portions: 2,
-    storedDate: '2026-11-23',
-    bestByDate: '2026-11-27',
-  });
-  assert.equal(getFreezerItemStatus(fridgeSoon, '2026-11-26').status, 'use-soon');
-
-  const expiredFreezer = { ...freshFreezer, bestByDate: '2026-11-20' };
-  assert.equal(getFreezerItemStatus(expiredFreezer, '2026-11-26').status, 'expired');
-
-  assert.equal(normalizeFreezerItem({ title: 'Soup', portions: '' }).portions, 1);
-  assert.equal(normalizeFreezerItem({ title: 'Soup', portions: 0 }).portions, 0);
-
-  const decremented = adjustFreezerPortions(freshFreezer, -4);
-  assert.equal(decremented.portions, 0);
-  assert.equal(getFreezerItemStatus(decremented, '2026-11-26').status, 'empty');
-
-  const added = upsertMealPrepItem([], freshFreezer, normalizeFreezerItem);
-  assert.equal(added.length, 1);
-  const tombstoned = deleteMealPrepItem(added, 'fr-1');
-  assert.equal(tombstoned[0].deleted, true);
-
   const customTpl = normalizeBatchTemplate({
+    id: 'tpl-pulled-pork',
     title: 'Pulled Pork 3 Ways',
     baseLabel: 'Braise 4 lb shoulder',
     derivatives: [{ title: 'Tacos', dayOffset: 2 }],
     updatedMs: 900,
   });
+  const added = upsertMealPrepItem([], customTpl, normalizeBatchTemplate);
+  assert.equal(added.length, 1);
+
   const mergedMp = mergeMealPrepData(
-    { templates: [{ ...customTpl, updatedMs: 100 }], freezerItems: [] },
-    { templates: [customTpl], freezerItems: [freshFreezer] }
+    { templates: [{ ...customTpl, updatedMs: 100 }] },
+    { templates: [customTpl] }
   );
   assert.ok(mergedMp.templates.some((t) => t.id === customTpl.id && t.updatedMs === 900));
-  assert.equal(mergedMp.freezerItems.length, 1);
+
+  const tombstoned = deleteMealPrepItem(added, 'tpl-pulled-pork');
+  assert.equal(tombstoned[0].deleted, true);
 
   const snapMerged = mergeCollectionSnapshots(
-    { dividers: [], recipes: [], mealPrepData: { templates: [], freezerItems: [] } },
-    { dividers: [], recipes: [], mealPrepData: { templates: [customTpl], freezerItems: [freshFreezer] } }
+    { dividers: [], recipes: [], mealPrepData: { templates: [] } },
+    { dividers: [], recipes: [], mealPrepData: { templates: [customTpl] } }
   );
-  assert.equal(snapMerged.mealPrepData.freezerItems.length, 1);
+  assert.ok(snapMerged.mealPrepData.templates.some((t) => t.id === 'tpl-pulled-pork'));
 });
 
 test('buildMergedPrepTimeline extracts temperatures, scales ingredients, and orders phases longest first', () => {
@@ -1199,11 +1170,17 @@ test('buildMergedPrepTimeline extracts temperatures, scales ingredients, and ord
   assert.equal(finish.steps.length, 2);
 });
 
-test('pantry ingredient normalization, CRUD, and mergeCollectionSnapshots propagate pantryData', () => {
+test('pantry unified inventory supports itemType, best-by freshness, portion steppers with auto Low/Out, and snapshot merge', () => {
   assert.equal(extractCoreIngredientName('1 1/2 lb boneless skinless chicken thighs, patted dry'), 'Boneless skinless chicken thighs');
   assert.equal(normalizeIngredientKey('1 1/2 lb boneless skinless chicken thighs, patted dry'), 'chicken thigh');
   assert.equal(normalizeIngredientKey('2 tbsp unsalted butter, divided'), 'butter');
   assert.equal(normalizeIngredientKey('1/4 cup fresh dill, chopped'), 'dill');
+
+  assert.ok(PANTRY_ITEM_TYPES.some((t) => t.id === 'cooked-meal'));
+  assert.ok(PANTRY_ITEM_TYPES.some((t) => t.id === 'mix-canned'));
+  assert.equal(getDefaultBestByDays('fridge'), 4);
+  assert.equal(getDefaultBestByDays('freezer'), 90);
+  assert.equal(getDefaultBestByDays('canning-shelf'), 365);
 
   const defaults = getDefaultPantryData();
   assert.ok(defaults.items.some((i) => i.id === 'pan-kosher-salt' && i.alwaysStocked));
@@ -1211,13 +1188,45 @@ test('pantry ingredient normalization, CRUD, and mergeCollectionSnapshots propag
   const chicken = normalizePantryItem({
     id: 'pan-chicken',
     name: 'Chicken Thighs',
+    itemType: 'ingredient',
     category: 'meat-seafood',
     location: 'fridge',
+    portions: 3,
+    quantity: '1 lb pack',
+    storedDate: '2026-11-24',
+    bestByDate: '2026-11-27',
     status: 'in-stock',
   });
+  assert.equal(getInventoryFreshness(chicken, '2026-11-26').status, 'use-soon');
+  assert.equal(getInventoryFreshness({ ...chicken, bestByDate: '2026-11-20' }, '2026-11-26').status, 'expired');
+  assert.equal(getInventoryFreshness({ ...chicken, bestByDate: '' }, '2026-11-26').status, 'none');
+
+  const stepTwo = adjustInventoryPortions(chicken, -2);
+  assert.equal(stepTwo.portions, 1);
+  assert.equal(stepTwo.status, 'low');
+  const stepZero = adjustInventoryPortions(stepTwo, -1);
+  assert.equal(stepZero.portions, 0);
+  assert.equal(stepZero.status, 'out');
+  assert.equal(getInventoryFreshness(stepZero, '2026-11-26').status, 'empty');
+  const restocked = adjustInventoryPortions(stepZero, 2);
+  assert.equal(restocked.status, 'in-stock');
+
   const cycled = cyclePantryStatus(chicken);
   assert.equal(cycled.status, 'low');
   assert.equal(cyclePantryStatus(cycled).status, 'out');
+
+  const cookedBatch = normalizePantryItem({
+    id: 'pan-chili',
+    name: 'Beef Chili Batch',
+    itemType: 'cooked-meal',
+    recipeId: 'rec-chili',
+    location: 'freezer',
+    portions: 4,
+    quantity: '1 1/2 cups',
+    reheatNotes: 'Microwave covered 2 min.',
+  });
+  assert.equal(cookedBatch.itemType, 'cooked-meal');
+  assert.equal(cookedBatch.reheatNotes, 'Microwave covered 2 min.');
 
   const upserted = upsertPantryItem(defaults.items, chicken);
   assert.equal(upserted.length, defaults.items.length + 1);
@@ -1232,9 +1241,9 @@ test('pantry ingredient normalization, CRUD, and mergeCollectionSnapshots propag
 
   const snapMerged = mergeCollectionSnapshots(
     { dividers: [], recipes: [], pantryData: { items: [] } },
-    { dividers: [], recipes: [], pantryData: { items: [chicken] } }
+    { dividers: [], recipes: [], pantryData: { items: [chicken, cookedBatch] } }
   );
-  assert.ok(snapMerged.pantryData.items.some((i) => i.id === 'pan-chicken'));
+  assert.ok(snapMerged.pantryData.items.some((i) => i.id === 'pan-chili'));
 });
 
 test('matchRecipesByIngredients ranks recipes by readiness, includes staples optionally, and uses word boundaries', () => {
@@ -1657,15 +1666,18 @@ test('Canning specs normalize, round-trip via Markdown, search cleanly, and Cann
 
   assert.ok(PANTRY_LOCATIONS.some((loc) => loc.id === 'canning-shelf'));
 
-  const cannedShelfEntry = normalizeFreezerItem({
+  const cannedShelfEntry = normalizePantryItem({
     id: 'can-1',
-    title: 'Dill Pickles (Pint)',
-    storageLocation: 'canning-shelf',
+    name: 'Dill Pickles (Pint)',
+    itemType: 'mix-canned',
+    location: 'canning-shelf',
     storedDate: '2026-01-01',
+    bestByDate: '2027-01-01',
     portions: 6,
   });
-  assert.equal(cannedShelfEntry.storageLocation, 'canning-shelf');
+  assert.equal(cannedShelfEntry.location, 'canning-shelf');
   assert.equal(cannedShelfEntry.bestByDate, '2027-01-01');
+  assert.equal(getDefaultBestByDays('canning-shelf'), 365);
 
   assert.ok(METHOD_CONVERSION_PRESETS.includes('Toaster Oven'));
   assert.equal(METHOD_CONVERSION_PRESETS.includes('Pressure Canner'), false);

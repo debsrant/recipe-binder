@@ -575,9 +575,9 @@ export function renderDetailView({
         <button type="button" class="btn btn-outline" data-action="duplicate-recipe" data-recipe-id="${escapeHtml(
           recipe.id
         )}">Duplicate</button>
-        <button type="button" class="btn btn-outline" data-action="send-recipe-to-freezer" data-recipe-id="${escapeHtml(
+        <button type="button" class="btn btn-outline" data-action="send-recipe-to-inventory" data-recipe-id="${escapeHtml(
           recipe.id
-        )}">Send to Freezer</button>
+        )}" title="Log cooked portions, mix, or canned jars to Kitchen Inventory">Store Batch</button>
         <button type="button" class="btn btn-outline" data-action="export-recipe-md" data-recipe-id="${escapeHtml(
           recipe.id
         )}">Export .md</button>

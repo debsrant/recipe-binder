@@ -1,9 +1,11 @@
 import { getRecipeMethods } from '../lib/collection.js';
 import {
   PANTRY_CATEGORIES,
+  PANTRY_ITEM_TYPES,
   PANTRY_LOCATIONS,
   PANTRY_STATUSES,
   collectBinderIngredients,
+  getInventoryFreshness,
   matchRecipesByIngredients,
   normalizeIngredientKey,
   normalizePantryData,
@@ -11,16 +13,23 @@ import {
 import { escapeHtml, formatMinutes } from './helpers.js';
 
 const PANTRY_SUB_TABS = [
-  { id: 'inventory', label: 'My Pantry' },
+  { id: 'inventory', label: 'Kitchen Inventory' },
   { id: 'matcher', label: 'What Can I Make?' },
 ];
 
 const PANTRY_STATUS_FILTERS = [
   { id: 'all', label: 'All' },
+  { id: 'use-soon', label: 'Use Soon / Expired' },
+  { id: 'restock', label: 'Low / Restock' },
   { id: 'in-stock', label: 'In Stock' },
-  { id: 'low', label: 'Running Low' },
-  { id: 'out', label: 'Out / Restock' },
   { id: 'staples', label: 'Always Stocked' },
+];
+
+const PANTRY_TYPE_FILTERS = [
+  { id: 'all', label: 'All Types' },
+  { id: 'ingredient', label: 'Ingredients & Bulk' },
+  { id: 'cooked-meal', label: 'Cooked Meals' },
+  { id: 'mix-canned', label: 'Mixes & Canned' },
 ];
 
 const MATCHER_FILTERS = [
@@ -55,6 +64,8 @@ function renderInventoryTab({
   recipes,
   pantryCategory,
   pantryStatusFilter,
+  pantryTypeFilter = 'all',
+  pantryLocationFilter = 'all',
   pantryQuery,
   editingPantryId,
 }) {
@@ -62,34 +73,64 @@ function renderInventoryTab({
     .filter((i) => !i.deleted)
     .sort((a, b) => (b.updatedMs || 0) - (a.updatedMs || 0) || a.name.localeCompare(b.name));
 
-  const inStockCount = activeItems.filter((i) => i.status === 'in-stock').length;
-  const lowCount = activeItems.filter((i) => i.status === 'low').length;
-  const outCount = activeItems.filter((i) => i.status === 'out').length;
-  const staplesCount = activeItems.filter((i) => i.alwaysStocked).length;
+  const withFreshness = activeItems.map((item) => ({
+    item,
+    freshness: getInventoryFreshness(item),
+  }));
+
+  const urgentCount = withFreshness.filter(
+    ({ freshness }) => freshness.status === 'use-soon' || freshness.status === 'expired'
+  ).length;
+  const restockCount = activeItems.filter((i) => i.status === 'low' || i.status === 'out').length;
+  const cookedCount = activeItems.filter((i) => i.itemType === 'cooked-meal').length;
 
   const cleanQuery = String(pantryQuery || '').trim().toLowerCase();
-  const filtered = activeItems.filter((item) => {
+  const filteredEntries = withFreshness.filter(({ item, freshness }) => {
     if (pantryCategory && pantryCategory !== 'all' && item.category !== pantryCategory) {
+      return false;
+    }
+    if (pantryTypeFilter && pantryTypeFilter !== 'all' && item.itemType !== pantryTypeFilter) {
+      return false;
+    }
+    if (
+      pantryLocationFilter &&
+      pantryLocationFilter !== 'all' &&
+      item.location !== pantryLocationFilter
+    ) {
       return false;
     }
     if (pantryStatusFilter === 'staples' && !item.alwaysStocked) return false;
     if (
-      pantryStatusFilter &&
-      pantryStatusFilter !== 'all' &&
-      pantryStatusFilter !== 'staples' &&
-      item.status !== pantryStatusFilter
+      pantryStatusFilter === 'use-soon' &&
+      freshness.status !== 'use-soon' &&
+      freshness.status !== 'expired'
     ) {
       return false;
     }
+    if (pantryStatusFilter === 'restock' && item.status !== 'low' && item.status !== 'out') {
+      return false;
+    }
+    if (pantryStatusFilter === 'in-stock' && item.status !== 'in-stock') {
+      return false;
+    }
     if (cleanQuery) {
-      const hay = `${item.name} ${item.quantity} ${item.notes} ${getLabel(
+      const hay = `${item.name} ${item.quantity} ${item.reheatNotes} ${item.notes} ${getLabel(
         PANTRY_CATEGORIES,
         item.category
-      )} ${getLabel(PANTRY_LOCATIONS, item.location)}`.toLowerCase();
+      )} ${getLabel(PANTRY_LOCATIONS, item.location)} ${getLabel(
+        PANTRY_ITEM_TYPES,
+        item.itemType
+      )}`.toLowerCase();
       if (!hay.includes(cleanQuery)) return false;
     }
     return true;
   });
+
+  if (pantryStatusFilter === 'use-soon') {
+    filteredEntries.sort(
+      (a, b) => (a.freshness.daysRemaining ?? 9999) - (b.freshness.daysRemaining ?? 9999)
+    );
+  }
 
   const editingItem = editingPantryId
     ? activeItems.find((i) => i.id === editingPantryId) || null
@@ -101,21 +142,47 @@ function renderInventoryTab({
     .slice(0, 24);
 
   const cardsHtml =
-    filtered.length > 0
-      ? filtered
-          .map((item) => {
+    filteredEntries.length > 0
+      ? filteredEntries
+          .map(({ item, freshness }) => {
             const statusLabel = getLabel(PANTRY_STATUSES, item.status, 'In Stock');
             const categoryLabel = getLabel(PANTRY_CATEGORIES, item.category, 'Other');
             const locationLabel = getLabel(PANTRY_LOCATIONS, item.location, 'Pantry');
+            const typeLabel =
+              item.itemType === 'cooked-meal'
+                ? 'Cooked Meal'
+                : item.itemType === 'mix-canned'
+                ? 'Mix / Canned'
+                : 'Ingredient';
+            const freshClass =
+              freshness.status === 'expired' || freshness.status === 'use-soon'
+                ? ` is-${freshness.status}`
+                : '';
             return `
-              <article class="pantry-card is-${escapeHtml(item.status)}${
+              <article class="pantry-card is-${escapeHtml(item.status)}${freshClass}${
                 editingPantryId === item.id ? ' is-editing' : ''
               }">
                 <div class="pantry-card-top">
                   <div>
                     <div class="pantry-badges-row">
-                      <span class="storage-badge">${escapeHtml(locationLabel)}</span>
-                      <span class="pantry-cat-badge">${escapeHtml(categoryLabel)}</span>
+                      <span class="item-type-badge is-${escapeHtml(item.itemType)}">${escapeHtml(
+                        typeLabel
+                      )}</span>
+                      <span class="storage-badge is-${escapeHtml(item.location)}">${escapeHtml(
+                        locationLabel
+                      )}</span>
+                      ${
+                        freshness.status !== 'none'
+                          ? `<span class="freshness-badge is-${escapeHtml(freshness.status)}">${escapeHtml(
+                              freshness.label
+                            )}</span>`
+                          : ''
+                      }
+                      ${
+                        item.itemType !== 'cooked-meal'
+                          ? `<span class="pantry-cat-badge">${escapeHtml(categoryLabel)}</span>`
+                          : ''
+                      }
                       ${
                         item.quantity
                           ? `<span class="pantry-qty-badge">${escapeHtml(item.quantity)}</span>`
@@ -125,6 +192,28 @@ function renderInventoryTab({
                     <h3>${escapeHtml(item.name)}</h3>
                   </div>
                   <div class="pantry-quick-controls no-print">
+                    <div class="portion-stepper" aria-label="Adjust stored count or portions">
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-outline"
+                        data-action="adjust-pantry-portions"
+                        data-item-id="${escapeHtml(item.id)}"
+                        data-delta="-1"
+                        ${item.portions === 0 || item.status === 'out' ? 'disabled' : ''}
+                        title="Use 1 portion or pack (auto-flags Low / Out)"
+                      >-1</button>
+                      <span class="portion-count" title="Portions / packs left">${escapeHtml(
+                        item.portions !== null && item.portions !== undefined ? String(item.portions) : '—'
+                      )}</span>
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-outline"
+                        data-action="adjust-pantry-portions"
+                        data-item-id="${escapeHtml(item.id)}"
+                        data-delta="1"
+                        title="Add 1 portion or pack"
+                      >+1</button>
+                    </div>
                     <button
                       type="button"
                       class="pantry-status-btn is-${escapeHtml(item.status)}"
@@ -138,9 +227,27 @@ function renderInventoryTab({
                       data-action="toggle-pantry-staple"
                       data-item-id="${escapeHtml(item.id)}"
                       aria-pressed="${item.alwaysStocked ? 'true' : 'false'}"
-                    >${item.alwaysStocked ? '★ Always Stocked' : '☆ Make Staple'}</button>
+                    >${item.alwaysStocked ? '★ Staple' : '☆ Staple'}</button>
                   </div>
                 </div>
+
+                ${
+                  item.storedDate || item.bestByDate
+                    ? `<p class="pantry-dates-line">${
+                        item.storedDate ? `Stored: ${escapeHtml(item.storedDate)}` : ''
+                      }${item.storedDate && item.bestByDate ? ' · ' : ''}${
+                        item.bestByDate ? `Best By: <strong>${escapeHtml(item.bestByDate)}</strong>` : ''
+                      }</p>`
+                    : ''
+                }
+
+                ${
+                  item.reheatNotes
+                    ? `<p class="freezer-reheat-note"><strong>Reheat:</strong> ${escapeHtml(
+                        item.reheatNotes
+                      )}</p>`
+                    : ''
+                }
 
                 ${
                   item.notes
@@ -149,6 +256,13 @@ function renderInventoryTab({
                 }
 
                 <div class="card-footer-actions no-print">
+                  ${
+                    item.recipeId
+                      ? `<button type="button" class="btn btn-sm btn-secondary" data-action="open-recipe" data-recipe-id="${escapeHtml(
+                          item.recipeId
+                        )}">Open Recipe</button>`
+                      : ''
+                  }
                   <button
                     type="button"
                     class="btn btn-sm btn-outline"
@@ -167,7 +281,7 @@ function renderInventoryTab({
           })
           .join('')
       : `<div class="empty-state-compact">
-           <p>No pantry ingredients match the current filter. Add an ingredient on the right or quick-add directly from your recipes.</p>
+           <p>No inventory items match the current filter. Add an ingredient, bulk pack, or cooked batch on the right, or click <strong>Store Batch</strong> from any recipe card.</p>
          </div>`;
 
   const categoryFilterOptions = [
@@ -180,6 +294,30 @@ function renderInventoryTab({
     ),
   ].join('');
 
+  const locationFilterOptions = [
+    '<option value="all">All Locations</option>',
+    ...PANTRY_LOCATIONS.map(
+      (l) =>
+        `<option value="${escapeHtml(l.id)}" ${
+          pantryLocationFilter === l.id ? 'selected' : ''
+        }>${escapeHtml(l.label)}</option>`
+    ),
+  ].join('');
+
+  const activeRecipes = (recipes || [])
+    .filter((r) => !r.deleted)
+    .sort((a, b) => a.title.localeCompare(b.title));
+
+  const recipeSelectOptions = [
+    '<option value="">-- Custom / Not linked to a recipe --</option>',
+    ...activeRecipes.map(
+      (r) =>
+        `<option value="${escapeHtml(r.id)}" ${
+          editingItem?.recipeId === r.id ? 'selected' : ''
+        }>${escapeHtml(r.title)}${r.servingSize ? ` (${escapeHtml(r.servingSize)})` : ''}</option>`
+    ),
+  ].join('');
+
   return `
     <div class="pantry-kpi-strip">
       <div class="kpi-box">
@@ -187,26 +325,34 @@ function renderInventoryTab({
         <span class="kpi-value">${escapeHtml(String(activeItems.length))}</span>
       </div>
       <div class="kpi-box">
-        <span class="kpi-label">In Stock</span>
-        <span class="kpi-value">${escapeHtml(String(inStockCount))}</span>
+        <span class="kpi-label">Use Soon / Expired</span>
+        <span class="kpi-value">${escapeHtml(String(urgentCount))}</span>
       </div>
       <div class="kpi-box">
-        <span class="kpi-label">Running Low</span>
-        <span class="kpi-value">${escapeHtml(String(lowCount))}</span>
+        <span class="kpi-label">Low / Restock</span>
+        <span class="kpi-value">${escapeHtml(String(restockCount))}</span>
       </div>
       <div class="kpi-box">
-        <span class="kpi-label">Out / Restock</span>
-        <span class="kpi-value">${escapeHtml(String(outCount))}</span>
-      </div>
-      <div class="kpi-box">
-        <span class="kpi-label">Always Stocked</span>
-        <span class="kpi-value">${escapeHtml(String(staplesCount))}</span>
+        <span class="kpi-label">Cooked Batches</span>
+        <span class="kpi-value">${escapeHtml(String(cookedCount))}</span>
       </div>
     </div>
 
     <div class="pantry-split-grid">
       <section class="pantry-list-col">
         <div class="pantry-toolbar no-print">
+          <div class="tag-filter-row pantry-type-filter-row">
+            ${PANTRY_TYPE_FILTERS.map(
+              (f) => `
+                <button
+                  type="button"
+                  class="tag-chip ${pantryTypeFilter === f.id ? 'is-active' : ''}"
+                  data-action="set-pantry-type-filter"
+                  data-type="${f.id}"
+                >${escapeHtml(f.label)}</button>
+              `
+            ).join('')}
+          </div>
           <div class="tag-filter-row">
             ${PANTRY_STATUS_FILTERS.map(
               (f) => `
@@ -220,7 +366,10 @@ function renderInventoryTab({
             ).join('')}
           </div>
           <div class="pantry-search-controls">
-            <select id="pantry-category-select" class="inline-mini-select" aria-label="Filter by pantry category">
+            <select id="pantry-location-filter-select" class="inline-mini-select" aria-label="Filter by storage location">
+              ${locationFilterOptions}
+            </select>
+            <select id="pantry-category-select" class="inline-mini-select" aria-label="Filter by inventory category">
               ${categoryFilterOptions}
             </select>
             <input
@@ -228,7 +377,7 @@ function renderInventoryTab({
               type="search"
               class="search-input"
               value="${escapeHtml(pantryQuery || '')}"
-              placeholder="Search pantry ingredients or notes..."
+              placeholder="Search items, portions, or reheat notes..."
             />
           </div>
         </div>
@@ -240,25 +389,55 @@ function renderInventoryTab({
 
       <aside class="pantry-side-col no-print">
         <div class="panel-card">
-          <h3>${editingItem ? 'Edit Pantry Ingredient' : 'Add Pantry Ingredient'}</h3>
+          <h3>${editingItem ? 'Edit Inventory Item' : 'Add to Kitchen Inventory'}</h3>
           <form
             id="pantry-item-form"
             class="stacked-form"
             data-pantry-id="${escapeHtml(editingItem?.id || '')}"
           >
             <div class="form-field">
-              <label for="pantry-name">Ingredient Name</label>
+              <label for="pantry-item-type">Item Type</label>
+              <select id="pantry-item-type" name="itemType">
+                ${PANTRY_ITEM_TYPES.map(
+                  (t) =>
+                    `<option value="${escapeHtml(t.id)}" ${
+                      (editingItem?.itemType || 'ingredient') === t.id ? 'selected' : ''
+                    }>${escapeHtml(t.label)}</option>`
+                ).join('')}
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pantry-recipe-select">Link Binder Recipe (optional — auto-fills details)</label>
+              <select id="pantry-recipe-select" name="recipeId">
+                ${recipeSelectOptions}
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pantry-name">Item / Dish Name</label>
               <input
                 id="pantry-name"
                 name="name"
                 type="text"
                 required
                 value="${escapeHtml(editingItem?.name || '')}"
-                placeholder="e.g., Chicken Thighs, Buttermilk, Fresh Dill"
+                placeholder="e.g., Chicken Thighs (Bulk), Lemon Garlic Chicken, Dill Pickles"
               />
             </div>
 
             <div class="form-two-col">
+              <div class="form-field">
+                <label for="pantry-location">Storage Location</label>
+                <select id="pantry-location" name="location">
+                  ${PANTRY_LOCATIONS.map(
+                    (l) =>
+                      `<option value="${escapeHtml(l.id)}" ${
+                        (editingItem?.location || 'pantry') === l.id ? 'selected' : ''
+                      }>${escapeHtml(l.label)}</option>`
+                  ).join('')}
+                </select>
+              </div>
               <div class="form-field">
                 <label for="pantry-category">Category</label>
                 <select id="pantry-category" name="category">
@@ -270,41 +449,71 @@ function renderInventoryTab({
                   ).join('')}
                 </select>
               </div>
-              <div class="form-field">
-                <label for="pantry-location">Location</label>
-                <select id="pantry-location" name="location">
-                  ${PANTRY_LOCATIONS.map(
-                    (l) =>
-                      `<option value="${escapeHtml(l.id)}" ${
-                        (editingItem?.location || 'pantry') === l.id ? 'selected' : ''
-                      }>${escapeHtml(l.label)}</option>`
-                  ).join('')}
-                </select>
-              </div>
             </div>
 
             <div class="form-two-col">
               <div class="form-field">
-                <label for="pantry-quantity">Quantity / Size</label>
+                <label for="pantry-portions">Count / Portions (for -1/+1)</label>
+                <input
+                  id="pantry-portions"
+                  name="portions"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value="${escapeHtml(
+                    editingItem?.portions !== null && editingItem?.portions !== undefined
+                      ? String(editingItem.portions)
+                      : ''
+                  )}"
+                  placeholder="e.g., 4"
+                />
+              </div>
+              <div class="form-field">
+                <label for="pantry-quantity">Unit / Pack Size</label>
                 <input
                   id="pantry-quantity"
                   name="quantity"
                   type="text"
                   value="${escapeHtml(editingItem?.quantity || '')}"
-                  placeholder="e.g., 2 lbs, 1 carton"
+                  placeholder="e.g., 1 lb pack, 2 thighs + sauce"
+                />
+              </div>
+            </div>
+
+            <div class="form-two-col">
+              <div class="form-field">
+                <label for="pantry-stored-date">Stored Date</label>
+                <input
+                  id="pantry-stored-date"
+                  name="storedDate"
+                  type="date"
+                  value="${escapeHtml(editingItem?.storedDate || '')}"
                 />
               </div>
               <div class="form-field">
-                <label for="pantry-status">Stock Status</label>
-                <select id="pantry-status" name="status">
-                  ${PANTRY_STATUSES.map(
-                    (s) =>
-                      `<option value="${escapeHtml(s.id)}" ${
-                        (editingItem?.status || 'in-stock') === s.id ? 'selected' : ''
-                      }>${escapeHtml(s.label)}</option>`
-                  ).join('')}
-                </select>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
+                  <label for="pantry-bestby-date" style="margin: 0;">Best-By Date</label>
+                  <button type="button" class="btn-link-inline" data-action="auto-pantry-bestby">Auto-Fill</button>
+                </div>
+                <input
+                  id="pantry-bestby-date"
+                  name="bestByDate"
+                  type="date"
+                  value="${escapeHtml(editingItem?.bestByDate || '')}"
+                />
               </div>
+            </div>
+
+            <div class="form-field">
+              <label for="pantry-status">Stock Status</label>
+              <select id="pantry-status" name="status">
+                ${PANTRY_STATUSES.map(
+                  (s) =>
+                    `<option value="${escapeHtml(s.id)}" ${
+                      (editingItem?.status || 'in-stock') === s.id ? 'selected' : ''
+                    }>${escapeHtml(s.label)}</option>`
+                ).join('')}
+              </select>
             </div>
 
             <label class="checkbox-inline">
@@ -317,12 +526,22 @@ function renderInventoryTab({
             </label>
 
             <div class="form-field">
+              <label for="pantry-reheat-notes">Reheating &amp; Thawing Notes (optional)</label>
+              <textarea
+                id="pantry-reheat-notes"
+                name="reheatNotes"
+                rows="2"
+                placeholder="e.g., Thaw overnight in fridge; microwave 90 sec covered or air fry 4 min..."
+              >${escapeHtml(editingItem?.reheatNotes || '')}</textarea>
+            </div>
+
+            <div class="form-field">
               <label for="pantry-notes">Notes</label>
               <textarea
                 id="pantry-notes"
                 name="notes"
                 rows="2"
-                placeholder="Brand, expiration reminder, or preferred store..."
+                placeholder="Brand, bulk cost notes, or preferred store..."
               >${escapeHtml(editingItem?.notes || '')}</textarea>
             </div>
 
@@ -333,7 +552,7 @@ function renderInventoryTab({
                   : ''
               }
               <button type="submit" class="btn btn-primary">${
-                editingItem ? 'Save Changes' : 'Add to Pantry'
+                editingItem ? 'Save Changes' : 'Add to Inventory'
               }</button>
             </div>
           </form>
@@ -341,7 +560,7 @@ function renderInventoryTab({
 
         <div class="panel-card">
           <h3>Quick-Add from Your Recipes</h3>
-          <p class="helper-copy">Tap any untracked binder ingredient below to add it to your pantry immediately.</p>
+          <p class="helper-copy">Tap any untracked binder ingredient below to add it to your inventory immediately.</p>
           <div class="quick-add-chip-list">
             ${
               quickAddSuggestions.length > 0
@@ -357,7 +576,7 @@ function renderInventoryTab({
                       `
                     )
                     .join('')
-                : '<p class="helper-copy">All ingredients from your current recipes are already tracked in your pantry.</p>'
+                : '<p class="helper-copy">All ingredients from your current recipes are already tracked in your inventory.</p>'
             }
           </div>
         </div>
@@ -646,6 +865,8 @@ export function renderPantryView({
   dividers = [],
   pantryCategory = 'all',
   pantryStatusFilter = 'all',
+  pantryTypeFilter = 'all',
+  pantryLocationFilter = 'all',
   pantryQuery = '',
   editingPantryId = null,
   matcherSelectedNames = new Set(),
@@ -672,6 +893,8 @@ export function renderPantryView({
           recipes,
           pantryCategory,
           pantryStatusFilter,
+          pantryTypeFilter,
+          pantryLocationFilter,
           pantryQuery,
           editingPantryId,
         });
@@ -681,8 +904,8 @@ export function renderPantryView({
       <div class="panel-card view-intro-card no-print">
         <div class="section-header-row">
           <div>
-            <h2>Virtual Pantry &amp; Ingredient Matcher</h2>
-            <p class="helper-copy">Track pantry stock, flag Always-Stocked staples, and see which recipes you can cook right now with what you have on hand.</p>
+            <h2>Kitchen Inventory &amp; Recipe Matcher</h2>
+            <p class="helper-copy">Track bulk packs, pantry staples, cooked freezer/fridge batches, and canned jars in one place with Best-By alerts and one-tap restock tracking.</p>
           </div>
           ${
             currentTab === 'inventory'

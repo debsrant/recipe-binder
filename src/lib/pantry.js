@@ -17,6 +17,12 @@ export const PANTRY_LOCATIONS = [
   { id: 'canning-shelf', label: 'Canning Shelf / Cellar' },
 ];
 
+export const PANTRY_ITEM_TYPES = [
+  { id: 'ingredient', label: 'Ingredient / Bulk Pack' },
+  { id: 'cooked-meal', label: 'Cooked Meal / Batch' },
+  { id: 'mix-canned', label: 'Mix / Canned Jar' },
+];
+
 export const PANTRY_STATUSES = [
   { id: 'in-stock', label: 'In Stock' },
   { id: 'low', label: 'Running Low' },
@@ -26,6 +32,38 @@ export const PANTRY_STATUSES = [
 const CATEGORY_SET = new Set(PANTRY_CATEGORIES.map((c) => c.id));
 const LOCATION_SET = new Set(PANTRY_LOCATIONS.map((l) => l.id));
 const STATUS_SET = new Set(PANTRY_STATUSES.map((s) => s.id));
+const ITEM_TYPE_SET = new Set(PANTRY_ITEM_TYPES.map((t) => t.id));
+
+const DEFAULT_BEST_BY_DAYS = {
+  fridge: 4,
+  freezer: 90,
+  'canning-shelf': 365,
+  pantry: 180,
+  'spice-rack': 365,
+};
+
+export function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function normalizeDateIso(value, fallback = '') {
+  const raw = String(value ?? '').trim();
+  if (!raw) return fallback;
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : fallback;
+}
+
+export function addDaysIso(isoDate, days) {
+  const base = normalizeDateIso(isoDate, todayIsoDate());
+  const ms = Date.parse(`${base}T00:00:00Z`);
+  if (!Number.isFinite(ms)) return '';
+  return new Date(ms + Number(days || 0) * 86400000).toISOString().slice(0, 10);
+}
+
+export function getDefaultBestByDays(location) {
+  const clean = String(location || '').trim().toLowerCase();
+  return DEFAULT_BEST_BY_DAYS[clean] ?? 180;
+}
 
 const UNICODE_FRAC_RE = /[\u00BC-\u00BE\u2150-\u215E]/g;
 const LEADING_QTY_RE =
@@ -148,13 +186,24 @@ export function normalizeIngredientKey(text) {
  * Normalizes a pantry item record.
  */
 export function normalizePantryItem(item) {
-  const name = cleanText(item?.name, 'Pantry Item');
+  const name = cleanText(item?.name, 'Inventory Item');
+  const rawType = cleanText(item?.itemType, 'ingredient').toLowerCase();
+  const itemType = ITEM_TYPE_SET.has(rawType) ? rawType : 'ingredient';
   const rawCategory = cleanText(item?.category, 'other').toLowerCase();
   const category = CATEGORY_SET.has(rawCategory) ? rawCategory : 'other';
   const rawLocation = cleanText(item?.location, 'pantry').toLowerCase();
   const location = LOCATION_SET.has(rawLocation) ? rawLocation : 'pantry';
   const rawStatus = cleanText(item?.status, 'in-stock').toLowerCase();
   const status = STATUS_SET.has(rawStatus) ? rawStatus : 'in-stock';
+  const hasPortions =
+    item?.portions !== '' && item?.portions !== null && item?.portions !== undefined;
+  const parsedPortions = hasPortions ? Number(item.portions) : NaN;
+  const portions =
+    Number.isFinite(parsedPortions) && parsedPortions >= 0
+      ? Math.round(parsedPortions * 100) / 100
+      : null;
+  const storedDate = normalizeDateIso(item?.storedDate, '');
+  const bestByDate = normalizeDateIso(item?.bestByDate, '');
   const updatedNum = Number(item?.updatedMs);
   const slug = name
     .toLowerCase()
@@ -164,10 +213,16 @@ export function normalizePantryItem(item) {
   return {
     id: cleanText(item?.id) || `pan-${slug || Date.now()}`,
     name,
+    itemType,
+    recipeId: cleanText(item?.recipeId),
     category,
     quantity: cleanText(item?.quantity),
+    portions,
     location,
     status,
+    storedDate,
+    bestByDate,
+    reheatNotes: cleanText(item?.reheatNotes),
     alwaysStocked: Boolean(item?.alwaysStocked),
     notes: cleanText(item?.notes),
     isCustom: Boolean(item?.isCustom),
@@ -318,6 +373,70 @@ export function toggleAlwaysStocked(item) {
 }
 
 /**
+ * Adjusts remaining portions/packs (>= 0) and auto-syncs stock status (`low` at <= 1, `out` at 0).
+ */
+export function adjustInventoryPortions(item, delta) {
+  const norm = normalizePantryItem(item);
+  const change = Number(delta);
+  const basePortions = norm.portions === null ? 0 : norm.portions;
+  const nextPortions = Number.isFinite(change)
+    ? Math.max(0, Math.round((basePortions + change) * 100) / 100)
+    : basePortions;
+  const nextStatus =
+    nextPortions <= 0 ? 'out' : nextPortions <= 1 ? 'low' : 'in-stock';
+
+  return {
+    ...norm,
+    portions: nextPortions,
+    status: nextStatus,
+    updatedMs: Date.now(),
+  };
+}
+
+/**
+ * Computes storage freshness status for any inventory item with a Best-By date.
+ * Returns: 'none' | 'empty' | 'expired' | 'use-soon' | 'fresh'
+ */
+export function getInventoryFreshness(item, referenceDate = todayIsoDate()) {
+  const norm = normalizePantryItem(item);
+  const bestIso = normalizeDateIso(norm.bestByDate);
+  if (!bestIso) {
+    if (norm.status === 'out' || norm.portions === 0) {
+      return { status: 'empty', label: 'Out / Empty', daysRemaining: 0 };
+    }
+    return { status: 'none', label: '', daysRemaining: null };
+  }
+  if (norm.status === 'out' || norm.portions === 0) {
+    return { status: 'empty', label: 'Out / Empty', daysRemaining: 0 };
+  }
+  const refIso = normalizeDateIso(referenceDate, todayIsoDate());
+  const refMs = Date.parse(`${refIso}T00:00:00Z`);
+  const bestMs = Date.parse(`${bestIso}T00:00:00Z`);
+  const daysRemaining = Math.round((bestMs - refMs) / 86400000);
+
+  if (daysRemaining < 0) {
+    return {
+      status: 'expired',
+      label: `Past Best-By (${Math.abs(daysRemaining)}d)`,
+      daysRemaining,
+    };
+  }
+  const threshold = norm.location === 'fridge' ? 2 : 14;
+  if (daysRemaining <= threshold) {
+    return {
+      status: 'use-soon',
+      label: daysRemaining === 0 ? 'Use Today' : `Use Soon (${daysRemaining}d)`,
+      daysRemaining,
+    };
+  }
+  return {
+    status: 'fresh',
+    label: `Fresh (${daysRemaining}d left)`,
+    daysRemaining,
+  };
+}
+
+/**
  * Extracts unique normalized ingredients from active binder recipes for quick-add and matching.
  */
 export function collectBinderIngredients(recipes) {
@@ -390,6 +509,7 @@ export function matchRecipesByIngredients(
   if (includeAlwaysStocked) {
     for (const item of pantryItems || []) {
       if (!item || item.deleted) continue;
+      if (item.itemType === 'cooked-meal') continue;
       if (item.alwaysStocked && item.status !== 'out') {
         const k = normalizeIngredientKey(item.name);
         if (k) availableKeys.add(k);

@@ -1,38 +1,14 @@
 import { getRecipeMethods } from '../lib/collection.js';
 import {
   buildMergedPrepTimeline,
-  getFreezerItemStatus,
   normalizeMealPrepData,
 } from '../lib/mealPrep.js';
 import { escapeHtml } from './helpers.js';
 
 const SUB_TABS = [
-  { id: 'freezer', label: 'Freezer & Leftovers' },
   { id: 'timeline', label: 'Merged Prep Timeline' },
   { id: 'templates', label: 'Cook Once, Eat Thrice' },
 ];
-
-const FREEZER_FILTERS = [
-  { id: 'all', label: 'All Stored' },
-  { id: 'freezer', label: 'Freezer Only' },
-  { id: 'fridge', label: 'Fridge Only' },
-  { id: 'canning-shelf', label: 'Canning Shelf' },
-  { id: 'use-soon', label: 'Use Soon / Expired' },
-];
-
-function storageLocationLabel(loc) {
-  if (loc === 'fridge') return 'Fridge';
-  if (loc === 'canning-shelf') return 'Canning Shelf';
-  return 'Freezer';
-}
-
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addDaysIso(days) {
-  return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
-}
 
 function renderSubTabs(activeTab) {
   return `
@@ -47,323 +23,6 @@ function renderSubTabs(activeTab) {
           >${escapeHtml(tab.label)}</button>
         `
       ).join('')}
-    </div>
-  `;
-}
-
-function renderFreezerTab({
-  freezerItems,
-  recipes,
-  freezerFilter,
-  freezerQuery,
-  editingFreezerId,
-  prefillFreezer,
-}) {
-  const activeItems = [...(freezerItems || [])]
-    .filter((i) => !i.deleted)
-    .sort((a, b) => (b.updatedMs || 0) - (a.updatedMs || 0));
-  const statuses = activeItems.map((item) => ({
-    item,
-    statusInfo: getFreezerItemStatus(item),
-  }));
-
-  const totalPortions = activeItems.reduce((sum, i) => sum + (Number(i.portions) || 0), 0);
-  const freezerCount = activeItems.filter((i) => i.storageLocation === 'freezer').length;
-  const fridgeCount = activeItems.filter((i) => i.storageLocation === 'fridge').length;
-  const canningCount = activeItems.filter((i) => i.storageLocation === 'canning-shelf').length;
-  const urgentCount = statuses.filter(
-    ({ statusInfo }) => statusInfo.status === 'use-soon' || statusInfo.status === 'expired'
-  ).length;
-
-  const cleanQuery = String(freezerQuery || '').trim().toLowerCase();
-  const filtered = statuses.filter(({ item, statusInfo }) => {
-    if (freezerFilter === 'freezer' && item.storageLocation !== 'freezer') return false;
-    if (freezerFilter === 'fridge' && item.storageLocation !== 'fridge') return false;
-    if (freezerFilter === 'canning-shelf' && item.storageLocation !== 'canning-shelf') return false;
-    if (
-      freezerFilter === 'use-soon' &&
-      statusInfo.status !== 'use-soon' &&
-      statusInfo.status !== 'expired'
-    ) {
-      return false;
-    }
-    if (cleanQuery) {
-      const hay = `${item.title} ${item.servingSize} ${item.reheatNotes}`.toLowerCase();
-      if (!hay.includes(cleanQuery)) return false;
-    }
-    return true;
-  });
-
-  const editingItem = editingFreezerId
-    ? activeItems.find((i) => i.id === editingFreezerId) || null
-    : null;
-  const formModel = editingItem ||
-    prefillFreezer || {
-      id: '',
-      recipeId: '',
-      title: '',
-      storageLocation: 'freezer',
-      portions: 4,
-      servingSize: '',
-      storedDate: todayIso(),
-      bestByDate: addDaysIso(90),
-      reheatNotes: '',
-    };
-
-  const activeRecipes = (recipes || [])
-    .filter((r) => !r.deleted)
-    .sort((a, b) => a.title.localeCompare(b.title));
-
-  const recipeOptions = [
-    '<option value="">-- Custom / Non-binder item --</option>',
-    ...activeRecipes.map(
-      (r) =>
-        `<option value="${escapeHtml(r.id)}" ${formModel.recipeId === r.id ? 'selected' : ''}>${escapeHtml(
-          r.title
-        )}${r.servingSize ? ` (${escapeHtml(r.servingSize)})` : ''}</option>`
-    ),
-  ].join('');
-
-  const cardsHtml =
-    filtered.length > 0
-      ? filtered
-          .map(
-            ({ item, statusInfo }) => `
-              <article class="freezer-card is-${escapeHtml(statusInfo.status)}${
-                editingFreezerId === item.id ? ' is-editing' : ''
-              }">
-                <div class="freezer-card-top">
-                  <div class="freezer-card-title-group">
-                    <div class="freezer-badges-row">
-                      <span class="storage-badge is-${escapeHtml(item.storageLocation)}">${escapeHtml(
-                        storageLocationLabel(item.storageLocation)
-                      )}</span>
-                      <span class="freshness-badge is-${escapeHtml(statusInfo.status)}">${escapeHtml(
-                        statusInfo.label
-                      )}</span>
-                    </div>
-                    <h3>${escapeHtml(item.title)}</h3>
-                  </div>
-                  <div class="portion-stepper no-print" aria-label="Adjust stored portions">
-                    <button
-                      type="button"
-                      class="btn btn-sm btn-outline"
-                      data-action="adjust-freezer-portions"
-                      data-item-id="${escapeHtml(item.id)}"
-                      data-delta="-1"
-                      ${item.portions <= 0 ? 'disabled' : ''}
-                    >-1</button>
-                    <span class="portion-count">${escapeHtml(String(item.portions))}</span>
-                    <button
-                      type="button"
-                      class="btn btn-sm btn-outline"
-                      data-action="adjust-freezer-portions"
-                      data-item-id="${escapeHtml(item.id)}"
-                      data-delta="1"
-                    >+1</button>
-                  </div>
-                </div>
-
-                <dl class="freezer-meta-grid">
-                  <div>
-                    <dt>Portions Left</dt>
-                    <dd>${escapeHtml(String(item.portions))} ${
-                      item.servingSize ? `(${escapeHtml(item.servingSize)} each)` : 'servings'
-                    }</dd>
-                  </div>
-                  <div>
-                    <dt>Stored</dt>
-                    <dd>${escapeHtml(item.storedDate || '—')}</dd>
-                  </div>
-                  <div>
-                    <dt>Best By</dt>
-                    <dd>${escapeHtml(item.bestByDate || '—')}</dd>
-                  </div>
-                </dl>
-
-                ${
-                  item.reheatNotes
-                    ? `<p class="freezer-reheat-note"><strong>Reheat:</strong> ${escapeHtml(
-                        item.reheatNotes
-                      )}</p>`
-                    : ''
-                }
-
-                <div class="card-footer-actions no-print">
-                  ${
-                    item.recipeId
-                      ? `<button type="button" class="btn btn-sm btn-secondary" data-action="open-recipe" data-recipe-id="${escapeHtml(
-                          item.recipeId
-                        )}">Open Recipe</button>`
-                      : ''
-                  }
-                  <button type="button" class="btn btn-sm btn-outline" data-action="edit-freezer-item" data-item-id="${escapeHtml(
-                    item.id
-                  )}">Edit</button>
-                  <button type="button" class="btn btn-sm btn-danger-outline" data-action="delete-freezer-item" data-item-id="${escapeHtml(
-                    item.id
-                  )}">Remove</button>
-                </div>
-              </article>
-            `
-          )
-          .join('')
-      : `<div class="empty-state-compact">
-           <p>No stored portions match the current filter. Open any recipe and click <strong>Send to Freezer</strong>, or log a batch on the right.</p>
-         </div>`;
-
-  return `
-    <div class="mealprep-kpi-strip">
-      <div class="kpi-box">
-        <span class="kpi-label">Stored Portions</span>
-        <span class="kpi-value">${escapeHtml(String(Math.round(totalPortions * 10) / 10))}</span>
-      </div>
-      <div class="kpi-box">
-        <span class="kpi-label">Freezer Items</span>
-        <span class="kpi-value">${escapeHtml(String(freezerCount))}</span>
-      </div>
-      <div class="kpi-box">
-        <span class="kpi-label">Fridge Items</span>
-        <span class="kpi-value">${escapeHtml(String(fridgeCount))}</span>
-      </div>
-      <div class="kpi-box">
-        <span class="kpi-label">Canning Shelf</span>
-        <span class="kpi-value">${escapeHtml(String(canningCount))}</span>
-      </div>
-      <div class="kpi-box">
-        <span class="kpi-label">Use Soon / Expired</span>
-        <span class="kpi-value">${escapeHtml(String(urgentCount))}</span>
-      </div>
-    </div>
-
-    <div class="mealprep-split-grid">
-      <section class="mealprep-list-col">
-        <div class="mealprep-filter-row no-print">
-          <div class="tag-filter-row">
-            ${FREEZER_FILTERS.map(
-              (f) => `
-                <button
-                  type="button"
-                  class="tag-chip ${freezerFilter === f.id ? 'is-active' : ''}"
-                  data-action="set-freezer-filter"
-                  data-filter="${f.id}"
-                >${escapeHtml(f.label)}</button>
-              `
-            ).join('')}
-          </div>
-          <input
-            id="mealprep-freezer-search"
-            type="search"
-            class="search-input"
-            value="${escapeHtml(freezerQuery || '')}"
-            placeholder="Search freezer / leftovers or reheat notes..."
-          />
-        </div>
-
-        <div class="freezer-grid">
-          ${cardsHtml}
-        </div>
-      </section>
-
-      <aside class="panel-card mealprep-form-col no-print">
-        <h3>${editingItem ? 'Edit Stored Entry' : 'Log Freezer / Leftover Batch'}</h3>
-        <form id="mealprep-freezer-form" class="stacked-form" data-freezer-id="${escapeHtml(editingItem?.id || '')}">
-
-          <div class="form-field">
-            <label for="freezer-recipe-select">Link Binder Recipe (optional)</label>
-            <select id="freezer-recipe-select" name="recipeId">
-              ${recipeOptions}
-            </select>
-          </div>
-
-          <div class="form-field">
-            <label for="freezer-title">Label / Dish Name</label>
-            <input
-              id="freezer-title"
-              name="title"
-              type="text"
-              required
-              value="${escapeHtml(formModel.title || '')}"
-              placeholder="e.g., Lemon Garlic Chicken Thighs"
-            />
-          </div>
-
-          <div class="form-two-col">
-            <div class="form-field">
-              <label for="freezer-location">Location</label>
-              <select id="freezer-location" name="storageLocation">
-                <option value="freezer" ${formModel.storageLocation === 'freezer' ? 'selected' : ''}>Freezer (90d default)</option>
-                <option value="fridge" ${formModel.storageLocation === 'fridge' ? 'selected' : ''}>Fridge (4d default)</option>
-                <option value="canning-shelf" ${formModel.storageLocation === 'canning-shelf' ? 'selected' : ''}>Canning Shelf / Cellar (1 yr default)</option>
-              </select>
-            </div>
-            <div class="form-field">
-              <label for="freezer-portions">Portions</label>
-              <input
-                id="freezer-portions"
-                name="portions"
-                type="number"
-                min="0"
-                step="any"
-                value="${escapeHtml(String(formModel.portions ?? 4))}"
-              />
-            </div>
-          </div>
-
-          <div class="form-field">
-            <label for="freezer-serving-size">Serving Yield Size (per portion)</label>
-            <input
-              id="freezer-serving-size"
-              name="servingSize"
-              type="text"
-              value="${escapeHtml(formModel.servingSize || '')}"
-              placeholder="e.g., 2 thighs + pan sauce, 1 cup"
-            />
-          </div>
-
-          <div class="form-two-col">
-            <div class="form-field">
-              <label for="freezer-stored-date">Stored Date</label>
-              <input
-                id="freezer-stored-date"
-                name="storedDate"
-                type="date"
-                value="${escapeHtml(formModel.storedDate || todayIso())}"
-              />
-            </div>
-            <div class="form-field">
-              <label for="freezer-bestby-date">Best-By Date</label>
-              <input
-                id="freezer-bestby-date"
-                name="bestByDate"
-                type="date"
-                value="${escapeHtml(formModel.bestByDate || addDaysIso(90))}"
-              />
-            </div>
-          </div>
-
-          <div class="form-field">
-            <label for="freezer-reheat">Reheating &amp; Thawing Notes</label>
-            <textarea
-              id="freezer-reheat"
-              name="reheatNotes"
-              rows="3"
-              placeholder="e.g., Thaw overnight in fridge; warm covered skillet 6 min with 1 tbsp splash of broth."
-            >${escapeHtml(formModel.reheatNotes || '')}</textarea>
-          </div>
-
-          <div class="form-actions-row">
-            ${
-              editingItem || prefillFreezer
-                ? '<button type="button" class="btn btn-outline" data-action="cancel-freezer-edit">Cancel</button>'
-                : ''
-            }
-            <button type="submit" class="btn btn-primary">${
-              editingItem ? 'Save Changes' : 'Add to Inventory'
-            }</button>
-          </div>
-        </form>
-      </aside>
     </div>
   `;
 }
@@ -829,52 +488,38 @@ function renderTemplatesTab({
  * Renders the Phase 5 Batch Cooking & Meal Prep Engine view.
  */
 export function renderMealPrepView({
-  activeTab = 'freezer',
+  activeTab = 'timeline',
   mealPrepData,
   recipes = [],
-  freezerFilter = 'all',
-  freezerQuery = '',
-  editingFreezerId = null,
-  prefillFreezer = null,
   editingTemplateId = null,
   timelineSelections = {},
   checkedTimelineSteps = new Set(),
 }) {
   const normalized = normalizeMealPrepData(mealPrepData);
-  const currentTab = SUB_TABS.some((t) => t.id === activeTab) ? activeTab : 'freezer';
+  const currentTab = SUB_TABS.some((t) => t.id === activeTab) ? activeTab : 'timeline';
 
-  let bodyHtml = '';
-  if (currentTab === 'timeline') {
-    bodyHtml = renderTimelineTab({
-      recipes,
-      timelineSelections,
-      checkedTimelineSteps,
-    });
-  } else if (currentTab === 'templates') {
-    bodyHtml = renderTemplatesTab({
-      templates: normalized.templates,
-      recipes,
-      editingTemplateId,
-    });
-  } else {
-    bodyHtml = renderFreezerTab({
-      freezerItems: normalized.freezerItems,
-      recipes,
-      freezerFilter,
-      freezerQuery,
-      editingFreezerId,
-      prefillFreezer,
-    });
-  }
+  const bodyHtml =
+    currentTab === 'templates'
+      ? renderTemplatesTab({
+          templates: normalized.templates,
+          recipes,
+          editingTemplateId,
+        })
+      : renderTimelineTab({
+          recipes,
+          timelineSelections,
+          checkedTimelineSteps,
+        });
 
   return `
     <section class="mealprep-view">
       <div class="panel-card view-intro-card no-print">
         <div class="section-header-row">
           <div>
-            <h2>Batch Cooking &amp; Meal Prep Engine</h2>
-            <p class="helper-copy">Track freezer &amp; fridge portions with reheating notes, merge multiple recipes into one prep timeline, and turn one base cook into multiple weeknight dinners.</p>
+            <h2>Batch Cooking &amp; Meal Prep Planner</h2>
+            <p class="helper-copy">Merge multiple recipes into one chronological prep timeline and turn one base cook into multiple weeknight dinners. Stored freezer, fridge &amp; canning batches live in Kitchen Inventory.</p>
           </div>
+          <button type="button" class="btn btn-outline" data-action="nav-view" data-view="pantry">Kitchen Inventory &rarr;</button>
         </div>
         ${renderSubTabs(currentTab)}
       </div>

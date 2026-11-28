@@ -220,14 +220,8 @@ async function startUserSync(user) {
 
     const maxUpdated = (arr) =>
       Array.isArray(arr) ? arr.reduce((m, x) => Math.max(m, Number(x?.updatedMs || 0)), 0) : 0;
-    const localMpMs = Math.max(
-      maxUpdated(merged.mealPrepData?.templates),
-      maxUpdated(merged.mealPrepData?.freezerItems)
-    );
-    const remoteMpMs = Math.max(
-      maxUpdated(remoteMeta?.mealPrepData?.templates),
-      maxUpdated(remoteMeta?.mealPrepData?.freezerItems)
-    );
+    const localMpMs = maxUpdated(merged.mealPrepData?.templates);
+    const remoteMpMs = maxUpdated(remoteMeta?.mealPrepData?.templates);
     if (
       merged.mealPrepData &&
       (!remoteMeta?.mealPrepData || localMpMs > remoteMpMs)
